@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Rabbi Core — data boundary: this is a metadata tracker, never a document
+# store. No exports, dumps, or uploaded files get committed to the repo.
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.sql.gz
+data/
+exports/
+uploads/
+*.dump
+*.bak
+

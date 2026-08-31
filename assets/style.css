@@ -1,0 +1,177 @@
+/* Rabbi Core — brand theme. Deep navy for text/headers/nav, teal for primary
+   actions and accents. Montserrat for headings, Lato for body. */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Lato:wght@400;500;700&display=swap');
+
+:root {
+    --rc-navy: #0A2540;
+    --rc-navy-light: #123a63;
+    --rc-teal: #1ABC9C;
+    --rc-teal-dark: #149174;
+    --rc-red: #E5484D;
+    --rc-amber: #F5A623;
+    --rc-green: #1ABC9C;
+    --rc-grey: #8A94A6;
+    --rc-bg: #F7F9FA;
+    --rc-card: #FFFFFF;
+    --rc-border: #E3E8EE;
+}
+
+html, body, [class*="css"] {
+    font-family: 'Lato', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--rc-navy);
+}
+
+.stApp {
+    background-color: var(--rc-bg);
+}
+
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 700;
+    color: var(--rc-navy);
+    letter-spacing: -0.01em;
+}
+
+/* ---- Sidebar / nav ------------------------------------------------------ */
+[data-testid="stSidebar"] {
+    background-color: var(--rc-navy);
+}
+[data-testid="stSidebar"] * {
+    color: #F2F5F8 !important;
+}
+[data-testid="stSidebar"] .rc-wordmark {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 800;
+    font-size: 1.35rem;
+    color: #FFFFFF !important;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.1rem;
+}
+[data-testid="stSidebar"] .rc-tagline {
+    font-size: 0.78rem;
+    color: #9FB3C8 !important;
+    margin-bottom: 1.25rem;
+}
+[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
+    padding: 0.35rem 0.5rem;
+    border-radius: 8px;
+}
+[data-testid="stSidebar"] hr {
+    border-color: #1E3A5C;
+}
+
+/* ---- Buttons -------------------------------------------------------------*/
+.stButton > button, .stFormSubmitButton > button {
+    background-color: var(--rc-teal);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 0.5rem 1.25rem;
+    transition: background-color 0.15s ease;
+}
+.stButton > button:hover, .stFormSubmitButton > button:hover {
+    background-color: var(--rc-teal-dark);
+    color: #FFFFFF;
+}
+.stButton > button:focus:not(:active) {
+    color: #FFFFFF;
+}
+button[kind="secondary"] {
+    background-color: #FFFFFF !important;
+    color: var(--rc-navy) !important;
+    border: 1px solid var(--rc-border) !important;
+}
+
+/* ---- Cards / containers --------------------------------------------------*/
+.rc-card {
+    background-color: var(--rc-card);
+    border: 1px solid var(--rc-border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(10, 37, 64, 0.06);
+}
+
+.rc-page-title {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 800;
+    font-size: 1.7rem;
+    color: var(--rc-navy);
+    margin-bottom: 0.15rem;
+}
+.rc-page-subtitle {
+    font-family: 'Lato', sans-serif;
+    color: var(--rc-grey);
+    margin-bottom: 1.25rem;
+}
+
+/* ---- Metric tiles ----------------------------------------------------- */
+[data-testid="stMetric"] {
+    background-color: var(--rc-card);
+    border: 1px solid var(--rc-border);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(10, 37, 64, 0.06);
+}
+[data-testid="stMetricLabel"] {
+    color: var(--rc-grey) !important;
+    font-weight: 600;
+}
+
+/* ---- Status / risk badges ---------------------------------------------- */
+.rc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.22rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.rc-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+.rc-badge-red { background: rgba(229, 72, 77, 0.12); color: #B3272B; }
+.rc-badge-amber { background: rgba(245, 166, 35, 0.15); color: #8A5A00; }
+.rc-badge-green { background: rgba(26, 188, 156, 0.15); color: #0E7A63; }
+.rc-badge-grey { background: rgba(138, 148, 166, 0.15); color: #566073; }
+
+/* ---- Login screen --------------------------------------------------------*/
+.rc-login-wrap {
+    max-width: 380px;
+    margin: 3rem auto 0 auto;
+    text-align: center;
+}
+.rc-login-wordmark {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 800;
+    font-size: 2rem;
+    color: var(--rc-navy);
+    margin-bottom: 0.1rem;
+}
+.rc-login-tagline {
+    color: var(--rc-grey);
+    margin-bottom: 2rem;
+}
+
+/* ---- Mobile ---------------------------------------------------------------*/
+@media (max-width: 640px) {
+    .rc-page-title { font-size: 1.35rem; }
+    .rc-card { padding: 1rem; }
+    [data-testid="stMetric"] { padding: 0.7rem 0.8rem; }
+}
+
+/* Tone down Streamlit's default block spacing a touch for a calmer page */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
