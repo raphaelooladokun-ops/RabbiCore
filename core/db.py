@@ -30,11 +30,22 @@ def _pool() -> ThreadedConnectionPool:
     return ThreadedConnectionPool(1, 10, dsn=_connection_string())
 
 
+_CONNECTION_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
 @contextmanager
 def get_cursor(commit: bool = False):
-    """Yield a RealDictCursor from the pool; commits on success if requested."""
+    """Yield a RealDictCursor from the pool; commits on success if requested.
+
+    Neon's pooled endpoint closes connections that sit idle between Streamlit
+    reruns, so a connection handed back by the pool can already be dead. When
+    that happens we discard it (close=True) instead of returning it to the
+    pool, so the next getconn() opens a fresh one rather than handing back
+    the same broken connection.
+    """
     pool = _pool()
     conn = pool.getconn()
+    stale = False
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             yield cur
@@ -42,17 +53,32 @@ def get_cursor(commit: bool = False):
             conn.commit()
         else:
             conn.rollback()
-    except Exception:
-        conn.rollback()
+    except Exception as e:
+        stale = isinstance(e, _CONNECTION_ERRORS)
+        try:
+            conn.rollback()
+        except Exception:
+            pass  # the connection is already dead; nothing to roll back
         raise
     finally:
-        pool.putconn(conn)
+        pool.putconn(conn, close=stale)
+
+
+def _with_retry(fn):
+    """Run fn() once, retrying a single time if the pooled connection was stale."""
+    try:
+        return fn()
+    except _CONNECTION_ERRORS:
+        return fn()
 
 
 def query(sql: str, params: tuple = ()) -> list:
-    with get_cursor() as cur:
-        cur.execute(sql, params)
-        return cur.fetchall()
+    def _do():
+        with get_cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+    return _with_retry(_do)
 
 
 def query_one(sql: str, params: tuple = ()):
@@ -61,12 +87,17 @@ def query_one(sql: str, params: tuple = ()):
 
 
 def execute(sql: str, params: tuple = ()) -> None:
-    with get_cursor(commit=True) as cur:
-        cur.execute(sql, params)
+    def _do():
+        with get_cursor(commit=True) as cur:
+            cur.execute(sql, params)
+
+    _with_retry(_do)
 
 
 def execute_returning(sql: str, params: tuple = ()):
-    with get_cursor(commit=True) as cur:
-        cur.execute(sql, params)
-        row = cur.fetchone()
-        return row
+    def _do():
+        with get_cursor(commit=True) as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
+
+    return _with_retry(_do)
