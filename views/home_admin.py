@@ -5,12 +5,11 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-import pandas as pd
 import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import RISK_AMBER, RISK_RED, STATUS_LABELS_SHORT, humanize
+from core.constants import RISK_AMBER, RISK_RED
 
 
 def render(user: dict) -> None:
@@ -32,16 +31,4 @@ def render(user: dict) -> None:
     st.write("")
     st.markdown("#### Needs attention")
     urgent.sort(key=lambda j: (j["sla_date"] or (date.today() + timedelta(days=999))))
-    if not urgent:
-        st.caption("Nothing overdue, due soon, or blocked right now.")
-    else:
-        rows = [
-            {
-                "Job ID": j["job_id"], "Client": j["client_name"], "What": j["title"],
-                "Status": STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])),
-                "SLA date": j["sla_date"].isoformat() if j["sla_date"] else "—",
-                "Owner": j["owner_name"] or "—",
-            }
-            for j in urgent[:10]
-        ]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    ui.jobs_row_table(urgent[:10], key_prefix="admin_home_urgent")

@@ -75,8 +75,8 @@ CATEGORY_LABELS = {
 # Invoice status
 # ---------------------------------------------------------------------------
 INVOICE_STATUS_LABELS = {
-    "draft": "Draft",
-    "issued": "Issued",
+    "pending_approval": "Pending approval",
+    "approved": "Approved",
     "paid": "Paid",
 }
 
@@ -105,6 +105,13 @@ RISK_LABELS = {
     RISK_AMBER: "Due / needs attention",
     RISK_GREEN: "Done / ready",
     RISK_GREY: "Monitoring",
+}
+
+RISK_EMOJI = {
+    RISK_RED: "🔴",
+    RISK_AMBER: "🟠",
+    RISK_GREEN: "🟢",
+    RISK_GREY: "⚪",
 }
 
 

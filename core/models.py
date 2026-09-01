@@ -213,9 +213,12 @@ class JobRuleError(Exception):
     pass
 
 
-def set_status(job_pk: int, new_status: str) -> None:
+def set_status(job_pk: int, new_status: str, reason: str | None = None) -> None:
     try:
-        execute("UPDATE job SET status = %s WHERE id = %s", (new_status, job_pk))
+        execute(
+            "UPDATE job SET status = %s, status_reason = %s WHERE id = %s",
+            (new_status, reason, job_pk),
+        )
     except psycopg2.errors.RaiseException as e:
         raise JobRuleError(str(e).split("\n")[0]) from e
 
@@ -246,31 +249,56 @@ def is_actually_blocked(job: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Invoicing
+# Invoicing — admin creates (submits for approval); principal approves.
 # ---------------------------------------------------------------------------
-def create_invoice(client_id: int) -> dict:
-    row = execute_returning(
-        "INSERT INTO invoice (invoice_code, client_id, status) VALUES (%s, %s, 'draft') RETURNING id",
-        (_temp_code("INV"), client_id),
-    )
-    invoice_code = f"INV-{date.today().year}-{row['id']:04d}"
-    execute("UPDATE invoice SET invoice_code = %s WHERE id = %s", (invoice_code, row["id"]))
+class InvoiceRuleError(Exception):
+    pass
+
+
+_INVOICE_SELECT = """
+    SELECT i.*, c.name AS client_name,
+           cb.name AS created_by_name, ab.name AS approved_by_name
+    FROM invoice i
+    JOIN client c ON c.id = i.client_id
+    LEFT JOIN staff cb ON cb.id = i.created_by
+    LEFT JOIN staff ab ON ab.id = i.approved_by
+"""
+
+
+def create_invoice(client_id: int, invoice_code: str, created_by: int) -> dict:
+    """Admin-only: submit a new invoice for the principal's approval."""
+    try:
+        row = execute_returning(
+            "INSERT INTO invoice (invoice_code, client_id, status, created_by) "
+            "VALUES (%s, %s, 'pending_approval', %s) RETURNING id",
+            (invoice_code, client_id, created_by),
+        )
+    except psycopg2.errors.UniqueViolation as e:
+        raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
     return get_invoice(row["id"])
 
 
-def get_invoice(invoice_id: int):
-    return query_one(
-        "SELECT i.*, c.name AS client_name FROM invoice i JOIN client c ON c.id = i.client_id WHERE i.id = %s",
-        (invoice_id,),
+def approve_invoice(invoice_id: int, approved_by: int) -> None:
+    """Principal-only: approve an invoice the admin submitted."""
+    execute(
+        "UPDATE invoice SET status = 'approved', approved_by = %s, approved_at = now() WHERE id = %s",
+        (approved_by, invoice_id),
     )
 
 
-def list_invoices(client_id: int | None = None) -> list:
-    sql = "SELECT i.*, c.name AS client_name FROM invoice i JOIN client c ON c.id = i.client_id WHERE 1=1"
+def get_invoice(invoice_id: int):
+    return query_one(_INVOICE_SELECT + " WHERE i.id = %s", (invoice_id,))
+
+
+def list_invoices(client_id: int | None = None, status: str | None = None) -> list:
+    sql = _INVOICE_SELECT + " WHERE 1=1"
     params: list = []
     if client_id:
         sql += " AND i.client_id = %s"
         params.append(client_id)
+    if status:
+        sql += " AND i.status = %s"
+        params.append(status)
     sql += " ORDER BY i.created_at DESC"
     return query(sql, tuple(params))
 
@@ -284,17 +312,63 @@ def detach_job_from_invoice(job_pk: int) -> None:
 
 
 def set_invoice_status(invoice_id: int, status: str) -> None:
-    extra = ""
-    if status == "issued":
-        extra = ", issued_at = now()"
-    elif status == "paid":
-        extra = ", paid_at = now()"
+    """Admin bookkeeping step (currently just 'paid') — approval has its own
+    function above since it also records who approved it and when."""
+    extra = ", paid_at = now()" if status == "paid" else ""
     execute(f"UPDATE invoice SET status = %s{extra} WHERE id = %s", (status, invoice_id))
 
 
 def close_job(job_pk: int) -> None:
-    """Mark a job closed. Requires invoice_id already set — enforced by the DB."""
+    """Mark a job closed. Requires an approved (or paid) invoice — enforced by the DB."""
     set_status(job_pk, STATUS_CLOSED)
+
+
+# ---------------------------------------------------------------------------
+# Per-job expense log — admin adds, principal can view. A running list, not
+# accounting.
+# ---------------------------------------------------------------------------
+def add_job_expense(job_id: int, description: str, amount: float, expense_date: date, created_by: int) -> None:
+    execute(
+        "INSERT INTO job_expense (job_id, description, amount, expense_date, created_by) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (job_id, description, amount, expense_date, created_by),
+    )
+
+
+def list_job_expenses(job_id: int) -> list:
+    return query(
+        """
+        SELECT e.*, s.name AS created_by_name
+        FROM job_expense e
+        LEFT JOIN staff s ON s.id = e.created_by
+        WHERE e.job_id = %s
+        ORDER BY e.expense_date DESC, e.id DESC
+        """,
+        (job_id,),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-job comment thread — lightweight, no edits or threading.
+# ---------------------------------------------------------------------------
+def add_job_comment(job_id: int, author_id: int, body: str) -> None:
+    execute(
+        "INSERT INTO job_comment (job_id, author_id, body) VALUES (%s, %s, %s)",
+        (job_id, author_id, body),
+    )
+
+
+def list_job_comments(job_id: int) -> list:
+    return query(
+        """
+        SELECT c.*, s.name AS author_name
+        FROM job_comment c
+        JOIN staff s ON s.id = c.author_id
+        WHERE c.job_id = %s
+        ORDER BY c.created_at DESC
+        """,
+        (job_id,),
+    )
 
 
 # ---------------------------------------------------------------------------

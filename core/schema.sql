@@ -48,17 +48,35 @@ CREATE TABLE IF NOT EXISTS service_catalogue (
 );
 
 -- ---------------------------------------------------------------------------
--- INVOICE — one invoice groups many jobs
+-- INVOICE — one invoice groups many jobs. Admin creates (submits for
+-- approval); principal approves. A job can only close once its invoice is
+-- approved (or paid) — see the status-guard trigger below.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS invoice (
     id              SERIAL PRIMARY KEY,
     invoice_code    TEXT NOT NULL UNIQUE,
     client_id       INTEGER NOT NULL REFERENCES client(id),
-    status          TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'issued', 'paid')),
+    status          TEXT NOT NULL DEFAULT 'pending_approval'
+                        CHECK (status IN ('pending_approval', 'approved', 'paid')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     issued_at       TIMESTAMPTZ,
     paid_at         TIMESTAMPTZ
 );
+
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES staff(id);
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES staff(id);
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+
+-- Migration for installs created before the admin-creates / principal-approves
+-- flow: map the old draft/issued statuses onto the new ones. Drop the old
+-- constraint FIRST so the old values are still legal while we remap them,
+-- then add the new constraint. No-op once already migrated.
+ALTER TABLE invoice DROP CONSTRAINT IF EXISTS invoice_status_check;
+UPDATE invoice SET status = 'pending_approval' WHERE status = 'draft';
+UPDATE invoice SET status = 'approved' WHERE status = 'issued';
+ALTER TABLE invoice ADD CONSTRAINT invoice_status_check
+    CHECK (status IN ('pending_approval', 'approved', 'paid'));
+ALTER TABLE invoice ALTER COLUMN status SET DEFAULT 'pending_approval';
 
 -- ---------------------------------------------------------------------------
 -- JOB — the central object of the whole suite
@@ -95,6 +113,11 @@ CREATE TABLE IF NOT EXISTS job (
 -- (dismissed items may not be tied to a client); no-op if already nullable.
 ALTER TABLE job ALTER COLUMN client_id DROP NOT NULL;
 
+-- The reason captured when a job is marked done or blocked (required by the
+-- UI for those two transitions) — holds the reason for the CURRENT status,
+-- overwritten on the next status change. Not a full history log, by design.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS status_reason TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_job_client_id ON job(client_id);
 CREATE INDEX IF NOT EXISTS idx_job_owner_id ON job(owner_id);
 CREATE INDEX IF NOT EXISTS idx_job_status ON job(status);
@@ -114,15 +137,47 @@ CREATE TABLE IF NOT EXISTS job_extension (
 );
 
 -- ---------------------------------------------------------------------------
+-- JOB EXPENSE — a simple running list of costs tied to a job. Admin adds
+-- them; principal can see them. Not accounting — just a log.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS job_expense (
+    id              SERIAL PRIMARY KEY,
+    job_id          INTEGER NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+    description     TEXT NOT NULL,
+    amount          NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    expense_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_by      INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_expense_job_id ON job_expense(job_id);
+
+-- ---------------------------------------------------------------------------
+-- JOB COMMENT — a lightweight comment thread on a job. Anyone with access to
+-- the job can post; kept simple on purpose (no edits, no threading).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS job_comment (
+    id              SERIAL PRIMARY KEY,
+    job_id          INTEGER NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+    author_id       INTEGER NOT NULL REFERENCES staff(id),
+    body            TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_comment_job_id ON job_comment(job_id);
+
+-- ---------------------------------------------------------------------------
 -- STATUS GUARD — the rules the brief says the system must enforce, kept in
 -- the database so no future module or UI can bypass them:
---   1. A job cannot become 'closed' without an invoice.
+--   1. A job cannot become 'closed' without an invoice, and that invoice
+--      must be approved (or paid) — not just attached.
 --   2. A job with an unresolved blocked_by is forced to show 'blocked' and
 --      cannot advance to in_progress / done / closed.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION job_status_guard() RETURNS trigger AS $$
 DECLARE
     blocker_status TEXT;
+    invoice_status_val TEXT;
 BEGIN
     IF NEW.blocked_by IS NOT NULL AND NEW.status <> 'dismissed' THEN
         SELECT status INTO blocker_status FROM job WHERE id = NEW.blocked_by;
@@ -136,8 +191,15 @@ BEGIN
         END IF;
     END IF;
 
-    IF NEW.status = 'closed' AND NEW.invoice_id IS NULL THEN
-        RAISE EXCEPTION 'Job % cannot be closed without an invoice', NEW.job_id;
+    IF NEW.status = 'closed' THEN
+        IF NEW.invoice_id IS NULL THEN
+            RAISE EXCEPTION 'Job % cannot be closed without an invoice', NEW.job_id;
+        END IF;
+
+        SELECT status INTO invoice_status_val FROM invoice WHERE id = NEW.invoice_id;
+        IF invoice_status_val NOT IN ('approved', 'paid') THEN
+            RAISE EXCEPTION 'Job % cannot be closed until its invoice is approved', NEW.job_id;
+        END IF;
     END IF;
 
     NEW.updated_at := now();

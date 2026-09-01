@@ -9,7 +9,7 @@ from core import ui
 from core.auth import current_user, logout
 from core.bootstrap import bootstrap_once
 from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST
-from views import billing, capture, home_admin, home_client, home_principal, home_specialist, login, register
+from views import billing, capture, home_admin, home_client, home_principal, home_specialist, job_detail, login, register
 
 st.set_page_config(page_title="Rabbi Core", page_icon="📋", layout="wide")
 
@@ -53,13 +53,22 @@ def main() -> None:
     st.sidebar.write("")
 
     page_names = [name for name, _ in pages]
-    choice = st.sidebar.radio("Navigate", page_names, label_visibility="collapsed")
+    choice = st.sidebar.radio("Navigate", page_names, label_visibility="collapsed", key="nav_choice")
+
+    if st.session_state.get("_last_nav_choice") != choice:
+        st.session_state["_last_nav_choice"] = choice
+        ui.clear_job_nav()
 
     st.sidebar.write("")
     st.sidebar.divider()
     if st.sidebar.button("Log out", use_container_width=True):
         logout()
         st.rerun()
+
+    nav_job_pk = st.session_state.get(ui.NAV_JOB_KEY)
+    if nav_job_pk:
+        job_detail.render(user, nav_job_pk)
+        return
 
     render_fn = dict(pages)[choice]
     render_fn(user)

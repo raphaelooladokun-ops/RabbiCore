@@ -40,6 +40,7 @@ def login(user: dict) -> None:
 
 def logout() -> None:
     st.session_state.pop(SESSION_KEY, None)
+    st.session_state.pop("nav_job_pk", None)
 
 
 def require_login() -> dict:

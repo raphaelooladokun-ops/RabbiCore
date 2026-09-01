@@ -30,7 +30,7 @@ core/
   constants.py          # roles, statuses, colours, human-readable labels
   ui.py                  # theme injection, badges, page headers
 views/
-  login.py, capture.py, register.py, billing.py,
+  login.py, capture.py, register.py, billing.py, job_detail.py,
   home_principal.py, home_admin.py, home_specialist.py, home_client.py
 assets/style.css      # navy/teal brand theme, Montserrat/Lato, status colours
 app.py                  # entrypoint: login gate + role-based navigation
@@ -98,7 +98,21 @@ Change or remove these before using the app with real client data.
   rendered dynamically at capture time.
 - **Front office module:** capture (two sources + dismiss-with-reason),
   register with a triage view, the `new → in_progress → blocked → done →
-  closed` lifecycle, and billing (group jobs onto an invoice, then close).
+  closed` lifecycle, and billing.
+- **Every job is one click away:** every job row anywhere in the app (the
+  register, needs-attention lists, the principal's clickable status counts)
+  opens the same job detail page — the one place a job is viewed and acted
+  on. Marking a job `done` or `blocked` requires a reason, captured in
+  `job.status_reason`. Admin logs per-job expenses (`job_expense`); the
+  principal can see them. Anyone with access to a job can leave a comment
+  (`job_comment`) — newest first, lightweight, no editing or threading.
+- **Invoice accountability flow:** only admin can create an invoice
+  (manually-entered code, one or more jobs attached) — it's submitted as
+  `pending_approval`. Only the principal can approve it. A job can't move to
+  `closed` until its invoice is `approved` (or `paid`) — enforced by the
+  same database trigger that guards `blocked_by`, so the rule holds no
+  matter which screen touches the row. `invoice.created_by` /
+  `approved_by` / `approved_at` record who did what.
 
 ## A judgement call worth flagging
 
