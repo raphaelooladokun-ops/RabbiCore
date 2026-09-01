@@ -19,6 +19,8 @@ from core.constants import (
 )
 
 NAV_JOB_KEY = "nav_job_pk"
+NAV_INVOICE_KEY = "nav_invoice_pk"
+NAV_CREATE_INVOICE_KEY = "nav_create_invoice"
 
 CSS_PATH = Path(__file__).parent.parent / "assets" / "style.css"
 
@@ -60,7 +62,22 @@ def source_label(value: str) -> str:
 def go_to_job(job_pk: int) -> None:
     """Navigate to the job detail page for job_pk — the one place every
     clickable job row, everywhere in the app, converges on."""
+    clear_all_nav()
     st.session_state[NAV_JOB_KEY] = job_pk
+    st.rerun()
+
+
+def go_to_invoice(invoice_pk: int) -> None:
+    """Navigate to the invoice document page — the one place an invoice,
+    everywhere it's referenced, converges on."""
+    clear_all_nav()
+    st.session_state[NAV_INVOICE_KEY] = invoice_pk
+    st.rerun()
+
+
+def go_to_create_invoice() -> None:
+    clear_all_nav()
+    st.session_state[NAV_CREATE_INVOICE_KEY] = True
     st.rerun()
 
 
@@ -68,9 +85,20 @@ def clear_job_nav() -> None:
     st.session_state[NAV_JOB_KEY] = None
 
 
+def clear_invoice_nav() -> None:
+    st.session_state[NAV_INVOICE_KEY] = None
+    st.session_state[NAV_CREATE_INVOICE_KEY] = False
+
+
+def clear_all_nav() -> None:
+    st.session_state[NAV_JOB_KEY] = None
+    st.session_state[NAV_INVOICE_KEY] = None
+    st.session_state[NAV_CREATE_INVOICE_KEY] = False
+
+
 def back_button(label: str = "← Back") -> None:
     if st.button(label, key=f"back_{label}"):
-        clear_job_nav()
+        clear_all_nav()
         st.rerun()
 
 
@@ -101,7 +129,11 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
         cols[4].write(j.get("owner_name") or "—")
         cols[5].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[6].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
-        cols[7].write(j.get("invoice_code") or "—")
+        if j.get("invoice_code"):
+            if cols[7].button(j["invoice_code"], key=f"{key_prefix}_inv_{j['id']}", type="tertiary"):
+                go_to_invoice(j["invoice_id"])
+        else:
+            cols[7].write("—")
 
 
 def sidebar_wordmark() -> None:

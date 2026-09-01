@@ -66,16 +66,21 @@ CREATE TABLE IF NOT EXISTS invoice (
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES staff(id);
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES staff(id);
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS invoice_date DATE NOT NULL DEFAULT CURRENT_DATE;
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejected_by INTEGER REFERENCES staff(id);
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
 
 -- Migration for installs created before the admin-creates / principal-approves
--- flow: map the old draft/issued statuses onto the new ones. Drop the old
--- constraint FIRST so the old values are still legal while we remap them,
--- then add the new constraint. No-op once already migrated.
+-- flow: map the old draft/issued statuses onto the new ones, and widen to
+-- allow 'rejected' (principal sends an invoice back to admin with a reason
+-- instead of restructuring it themselves). Drop the old constraint FIRST so
+-- the old values are still legal while we remap them. No-op once migrated.
 ALTER TABLE invoice DROP CONSTRAINT IF EXISTS invoice_status_check;
 UPDATE invoice SET status = 'pending_approval' WHERE status = 'draft';
 UPDATE invoice SET status = 'approved' WHERE status = 'issued';
 ALTER TABLE invoice ADD CONSTRAINT invoice_status_check
-    CHECK (status IN ('pending_approval', 'approved', 'paid'));
+    CHECK (status IN ('pending_approval', 'approved', 'paid', 'rejected'));
 ALTER TABLE invoice ALTER COLUMN status SET DEFAULT 'pending_approval';
 
 -- ---------------------------------------------------------------------------
@@ -165,6 +170,24 @@ CREATE TABLE IF NOT EXISTS job_comment (
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_comment_job_id ON job_comment(job_id);
+
+-- ---------------------------------------------------------------------------
+-- INVOICE LINE — a real invoice's line items. One line per job on the
+-- invoice: description + amount, editable by the principal at review time,
+-- but the set of jobs (which rows exist here) is admin-only to change —
+-- that's what makes "which jobs are on this invoice" an accountable,
+-- admin-owned decision rather than something the approver can quietly edit.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS invoice_line (
+    id              SERIAL PRIMARY KEY,
+    invoice_id      INTEGER NOT NULL REFERENCES invoice(id) ON DELETE CASCADE,
+    job_id          INTEGER NOT NULL REFERENCES job(id),
+    description     TEXT NOT NULL,
+    amount          NUMERIC(12, 2) NOT NULL CHECK (amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_line_invoice_id ON invoice_line(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_line_job_id ON invoice_line(job_id);
 
 -- ---------------------------------------------------------------------------
 -- STATUS GUARD — the rules the brief says the system must enforce, kept in

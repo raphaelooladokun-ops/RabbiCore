@@ -172,7 +172,7 @@ DEMO_JOBS = [
 ]
 
 DEMO_INVOICES = [
-    # invoice_code, client_name, status, job_ids to attach (must be 'done' already)
+    # invoice_code, client_name, status, line items (each ties to a 'done' job)
     dict(invoice_code="INV-2026-0001", client_name="Lagos Trading Co", status="paid",
-         job_ids=["JOB-2026-0005"]),
+         lines=[{"job_id": "JOB-2026-0005", "description": "PAYE registration — Lagos", "amount": 45000}]),
 ]

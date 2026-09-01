@@ -191,13 +191,16 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
     return query(_JOB_SELECT + " WHERE j.invoice_id = %s ORDER BY j.created_at", (invoice_id,))
 
 
-def list_jobs_awaiting_invoice(client_id: int | None = None) -> list:
-    sql = _JOB_SELECT + " WHERE j.status = 'done' AND j.invoice_id IS NULL"
-    params: list = []
-    if client_id:
-        sql += " AND j.client_id = %s"
-        params.append(client_id)
-    sql += " ORDER BY j.status_changed_at"
+def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = None) -> list:
+    """Done jobs for this client not yet on any invoice, plus — when revising
+    an existing invoice — the jobs already on THAT invoice, so the admin can
+    review and adjust its composition."""
+    sql = _JOB_SELECT + " WHERE j.client_id = %s AND j.status = 'done' AND (j.invoice_id IS NULL"
+    params: list = [client_id]
+    if invoice_id:
+        sql += " OR j.invoice_id = %s"
+        params.append(invoice_id)
+    sql += ") ORDER BY j.status_changed_at"
     return query(sql, tuple(params))
 
 
@@ -249,41 +252,108 @@ def is_actually_blocked(job: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Invoicing — admin creates (submits for approval); principal approves.
+# Invoicing — a real invoice: client, line items (one per job), amounts,
+# code, date. Admin builds and submits it; principal reviews it as a
+# document and can edit amounts/descriptions, approve, or reject it back
+# to admin with a reason. Only admin can change which jobs are on it.
 # ---------------------------------------------------------------------------
 class InvoiceRuleError(Exception):
     pass
 
 
 _INVOICE_SELECT = """
-    SELECT i.*, c.name AS client_name,
-           cb.name AS created_by_name, ab.name AS approved_by_name
+    SELECT i.*, c.name AS client_name, c.contact_name AS client_contact_name,
+           c.contact_email AS client_contact_email,
+           cb.name AS created_by_name, ab.name AS approved_by_name, rb.name AS rejected_by_name
     FROM invoice i
     JOIN client c ON c.id = i.client_id
     LEFT JOIN staff cb ON cb.id = i.created_by
     LEFT JOIN staff ab ON ab.id = i.approved_by
+    LEFT JOIN staff rb ON rb.id = i.rejected_by
 """
 
 
-def create_invoice(client_id: int, invoice_code: str, created_by: int) -> dict:
-    """Admin-only: submit a new invoice for the principal's approval."""
+def create_invoice(client_id: int, invoice_code: str, invoice_date: date, created_by: int, lines: list) -> dict:
+    """Admin-only: build and submit a new invoice for the principal's
+    approval. `lines` is a list of {job_id, description, amount}."""
     try:
         row = execute_returning(
-            "INSERT INTO invoice (invoice_code, client_id, status, created_by) "
-            "VALUES (%s, %s, 'pending_approval', %s) RETURNING id",
-            (invoice_code, client_id, created_by),
+            "INSERT INTO invoice (invoice_code, client_id, status, created_by, invoice_date) "
+            "VALUES (%s, %s, 'pending_approval', %s, %s) RETURNING id",
+            (invoice_code, client_id, created_by, invoice_date),
         )
     except psycopg2.errors.UniqueViolation as e:
         raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
-    return get_invoice(row["id"])
+    invoice_id = row["id"]
+    for line in lines:
+        execute(
+            "INSERT INTO invoice_line (invoice_id, job_id, description, amount) VALUES (%s, %s, %s, %s)",
+            (invoice_id, line["job_id"], line["description"], line["amount"]),
+        )
+        execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, line["job_id"]))
+    return get_invoice(invoice_id)
+
+
+def revise_invoice(invoice_id: int, invoice_code: str, invoice_date: date, lines: list) -> dict:
+    """Admin-only: rework a rejected invoice's jobs/line items/code/date and
+    resubmit it. This is the only path that can change which jobs are on an
+    invoice once it's been created."""
+    old_job_ids = {r["job_id"] for r in query("SELECT job_id FROM invoice_line WHERE invoice_id = %s", (invoice_id,))}
+    new_job_ids = {line["job_id"] for line in lines}
+
+    for job_id in old_job_ids - new_job_ids:
+        execute("UPDATE job SET invoice_id = NULL WHERE id = %s", (job_id,))
+
+    execute("DELETE FROM invoice_line WHERE invoice_id = %s", (invoice_id,))
+    for line in lines:
+        execute(
+            "INSERT INTO invoice_line (invoice_id, job_id, description, amount) VALUES (%s, %s, %s, %s)",
+            (invoice_id, line["job_id"], line["description"], line["amount"]),
+        )
+        execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, line["job_id"]))
+
+    try:
+        execute(
+            "UPDATE invoice SET invoice_code = %s, invoice_date = %s, status = 'pending_approval', "
+            "rejection_reason = NULL, rejected_by = NULL, rejected_at = NULL WHERE id = %s",
+            (invoice_code, invoice_date, invoice_id),
+        )
+    except psycopg2.errors.UniqueViolation as e:
+        raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
+    return get_invoice(invoice_id)
+
+
+def update_invoice_lines(invoice_id: int, lines: list) -> None:
+    """Principal-only: edit descriptions/amounts on the EXISTING line items.
+    Never inserts or deletes a line — that would change job composition,
+    which stays admin-only."""
+    for line in lines:
+        execute(
+            "UPDATE invoice_line SET description = %s, amount = %s WHERE id = %s AND invoice_id = %s",
+            (line["description"], line["amount"], line["id"], invoice_id),
+        )
 
 
 def approve_invoice(invoice_id: int, approved_by: int) -> None:
-    """Principal-only: approve an invoice the admin submitted."""
     execute(
         "UPDATE invoice SET status = 'approved', approved_by = %s, approved_at = now() WHERE id = %s",
         (approved_by, invoice_id),
     )
+
+
+def reject_invoice(invoice_id: int, rejected_by: int, reason: str) -> None:
+    execute(
+        "UPDATE invoice SET status = 'rejected', rejected_by = %s, rejected_at = now(), rejection_reason = %s "
+        "WHERE id = %s",
+        (rejected_by, reason, invoice_id),
+    )
+
+
+def set_invoice_status(invoice_id: int, status: str) -> None:
+    """Admin bookkeeping step (currently just 'paid') — approval/rejection
+    have their own functions above since they also record who and when."""
+    extra = ", paid_at = now()" if status == "paid" else ""
+    execute(f"UPDATE invoice SET status = %s{extra} WHERE id = %s", (status, invoice_id))
 
 
 def get_invoice(invoice_id: int):
@@ -303,19 +373,22 @@ def list_invoices(client_id: int | None = None, status: str | None = None) -> li
     return query(sql, tuple(params))
 
 
-def attach_job_to_invoice(job_pk: int, invoice_id: int) -> None:
-    execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, job_pk))
+def list_invoice_lines(invoice_id: int) -> list:
+    return query(
+        """
+        SELECT il.*, j.job_id AS job_code, j.title AS job_title
+        FROM invoice_line il
+        JOIN job j ON j.id = il.job_id
+        WHERE il.invoice_id = %s
+        ORDER BY il.id
+        """,
+        (invoice_id,),
+    )
 
 
-def detach_job_from_invoice(job_pk: int) -> None:
-    execute("UPDATE job SET invoice_id = %s WHERE id = %s", (None, job_pk))
-
-
-def set_invoice_status(invoice_id: int, status: str) -> None:
-    """Admin bookkeeping step (currently just 'paid') — approval has its own
-    function above since it also records who approved it and when."""
-    extra = ", paid_at = now()" if status == "paid" else ""
-    execute(f"UPDATE invoice SET status = %s{extra} WHERE id = %s", (status, invoice_id))
+def invoice_total(invoice_id: int) -> float:
+    row = query_one("SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_line WHERE invoice_id = %s", (invoice_id,))
+    return float(row["total"]) if row else 0.0
 
 
 def close_job(job_pk: int) -> None:

@@ -9,7 +9,19 @@ from core import ui
 from core.auth import current_user, logout
 from core.bootstrap import bootstrap_once
 from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST
-from views import billing, capture, home_admin, home_client, home_principal, home_specialist, job_detail, login, register
+from views import (
+    billing,
+    capture,
+    home_admin,
+    home_client,
+    home_principal,
+    home_specialist,
+    invoice_create,
+    invoice_detail,
+    job_detail,
+    login,
+    register,
+)
 
 st.set_page_config(page_title="Rabbi Core", page_icon="📋", layout="wide")
 
@@ -53,17 +65,44 @@ def main() -> None:
     st.sidebar.write("")
 
     page_names = [name for name, _ in pages]
-    choice = st.sidebar.radio("Navigate", page_names, label_visibility="collapsed", key="nav_choice")
+    choice = st.session_state.get("_current_page")
+    if choice not in page_names:
+        choice = page_names[0]
+        st.session_state["_current_page"] = choice
 
-    if st.session_state.get("_last_nav_choice") != choice:
-        st.session_state["_last_nav_choice"] = choice
-        ui.clear_job_nav()
+    in_detail_view = bool(
+        st.session_state.get(ui.NAV_JOB_KEY)
+        or st.session_state.get(ui.NAV_INVOICE_KEY)
+        or st.session_state.get(ui.NAV_CREATE_INVOICE_KEY)
+    )
+
+    # Real buttons, not a radio: a click always reruns even when the page is
+    # already "selected", so clicking a sidebar item reliably exits a job or
+    # invoice detail view back to that list — a radio's unchanged value
+    # would silently no-op in that exact situation.
+    for name in page_names:
+        active = name == choice and not in_detail_view
+        if st.sidebar.button(
+            name, key=f"navbtn_{name}", type="primary" if active else "secondary", use_container_width=True
+        ):
+            st.session_state["_current_page"] = name
+            ui.clear_all_nav()
+            st.rerun()
 
     st.sidebar.write("")
     st.sidebar.divider()
     if st.sidebar.button("Log out", use_container_width=True):
         logout()
         st.rerun()
+
+    if st.session_state.get(ui.NAV_CREATE_INVOICE_KEY):
+        invoice_create.render(user)
+        return
+
+    nav_invoice_pk = st.session_state.get(ui.NAV_INVOICE_KEY)
+    if nav_invoice_pk:
+        invoice_detail.render(user, nav_invoice_pk)
+        return
 
     nav_job_pk = st.session_state.get(ui.NAV_JOB_KEY)
     if nav_job_pk:

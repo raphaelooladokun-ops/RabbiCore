@@ -59,8 +59,8 @@ def render(user: dict, job_pk: int) -> None:
         _notes_editor(job, key_prefix)
         st.divider()
 
-    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] == STATUS_DONE:
-        _close_action(job)
+    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] in (STATUS_DONE, STATUS_CLOSED):
+        _invoice_section(job, user)
         st.divider()
 
     if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL):
@@ -91,10 +91,6 @@ def _info(job: dict) -> None:
     with c2:
         st.write(f"**Logged:** {job['created_at'].strftime('%d %b %Y')}")
         st.write(f"**SLA date:** {job['sla_date'].isoformat() if job['sla_date'] else '—'}")
-        invoice_line = "Not invoiced"
-        if job["invoice_code"]:
-            invoice_line = f"{job['invoice_code']} — {humanize(job['invoice_status'], INVOICE_STATUS_LABELS)}"
-        st.write(f"**Invoice:** {invoice_line}")
         if job["blocked_by"]:
             blocker_state = "resolved" if not models.is_actually_blocked(job) else "unresolved"
             st.write(f"**Depends on:** {job['blocked_by_job_code']} ({blocker_state})")
@@ -209,22 +205,34 @@ def _notes_editor(job: dict, key_prefix: str) -> None:
             st.rerun()
 
 
-def _close_action(job: dict) -> None:
-    st.markdown("#### Close")
-    if job["invoice_id"] is None:
-        st.info("Attach this job to an invoice on the Billing page before it can be closed.")
-        return
-    if job["invoice_status"] not in ("approved", "paid"):
-        st.info(f"Waiting on approval for invoice **{job['invoice_code']}** before this job can close.")
-        return
-    if st.button("Mark closed", key=f"close_{job['id']}", type="primary"):
-        try:
-            models.close_job(job["id"])
-        except models.JobRuleError as e:
-            st.error(str(e))
+def _invoice_section(job: dict, user: dict) -> None:
+    st.markdown("#### Invoice")
+
+    if job["invoice_code"]:
+        status_label = humanize(job["invoice_status"], INVOICE_STATUS_LABELS)
+        if st.button(f"{job['invoice_code']} — {status_label}", key=f"jd_openinv_{job['id']}", type="tertiary"):
+            ui.go_to_invoice(job["invoice_id"])
+    else:
+        st.caption("Not yet invoiced.")
+        if user["role"] == ROLE_ADMIN and job["status"] == STATUS_DONE:
+            if st.button("Create invoice", key=f"jd_createinv_{job['id']}", type="primary"):
+                st.session_state["invoice_seed_job"] = job["id"]
+                st.session_state["invoice_seed_client"] = None
+                st.session_state["invoice_revise_id"] = None
+                ui.go_to_create_invoice()
+
+    if job["status"] == STATUS_DONE and job["invoice_id"]:
+        if job["invoice_status"] not in ("approved", "paid"):
+            st.info(f"Waiting on approval for invoice **{job['invoice_code']}** before this job can close.")
         else:
-            st.toast("Job closed.", icon="✅")
-            st.rerun()
+            if st.button("Mark closed", key=f"close_{job['id']}", type="primary"):
+                try:
+                    models.close_job(job["id"])
+                except models.JobRuleError as e:
+                    st.error(str(e))
+                else:
+                    st.toast("Job closed.", icon="✅")
+                    st.rerun()
 
 
 def _expenses(job: dict, user: dict) -> None:

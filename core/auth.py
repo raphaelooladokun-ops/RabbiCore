@@ -40,7 +40,11 @@ def login(user: dict) -> None:
 
 def logout() -> None:
     st.session_state.pop(SESSION_KEY, None)
-    st.session_state.pop("nav_job_pk", None)
+    for key in (
+        "nav_job_pk", "nav_invoice_pk", "nav_create_invoice",
+        "invoice_seed_job", "invoice_seed_client", "invoice_revise_id",
+    ):
+        st.session_state.pop(key, None)
 
 
 def require_login() -> dict:

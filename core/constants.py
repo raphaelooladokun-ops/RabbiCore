@@ -78,6 +78,7 @@ INVOICE_STATUS_LABELS = {
     "pending_approval": "Pending approval",
     "approved": "Approved",
     "paid": "Paid",
+    "rejected": "Rejected",
 }
 
 # ---------------------------------------------------------------------------

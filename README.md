@@ -106,13 +106,20 @@ Change or remove these before using the app with real client data.
   `job.status_reason`. Admin logs per-job expenses (`job_expense`); the
   principal can see them. Anyone with access to a job can leave a comment
   (`job_comment`) — newest first, lightweight, no editing or threading.
-- **Invoice accountability flow:** only admin can create an invoice
-  (manually-entered code, one or more jobs attached) — it's submitted as
-  `pending_approval`. Only the principal can approve it. A job can't move to
-  `closed` until its invoice is `approved` (or `paid`) — enforced by the
-  same database trigger that guards `blocked_by`, so the rule holds no
-  matter which screen touches the row. `invoice.created_by` /
-  `approved_by` / `approved_at` record who did what.
+- **A real invoice, not a toggle:** admin builds it from a job's detail page
+  (or from Billing) — client is fixed from the job, one or more done jobs
+  become line items (`invoice_line`: description + amount each), plus an
+  invoice code and date. Submitting sends it to the principal as
+  `pending_approval`, rendered as an actual document (bill-to, line items,
+  total) rather than a form. The principal can edit descriptions/amounts and
+  approve, or reject it back to admin with a required reason — only admin
+  can change *which jobs* are on an invoice (add/remove), so a rejection is
+  how the principal disputes composition rather than quietly fixing it
+  themselves. A rejected invoice can be revised (jobs, lines, code, date)
+  and resubmitted. A job can't move to `closed` until its invoice is
+  `approved` or `paid` — enforced by the same trigger that guards
+  `blocked_by`. Every invoice is clickable everywhere it's referenced
+  (register, job detail, billing) and opens the same document page.
 
 ## A judgement call worth flagging
 

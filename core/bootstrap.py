@@ -122,13 +122,22 @@ def seed_demo_data() -> None:
             continue
         invoice_row = execute_returning(
             """
-            INSERT INTO invoice (invoice_code, client_id, status, issued_at, paid_at)
-            VALUES (%s, %s, %s, now(), now())
+            INSERT INTO invoice (invoice_code, client_id, status, created_by, approved_by, approved_at, paid_at)
+            VALUES (%s, %s, %s, %s, %s, now(), now())
             RETURNING id
             """,
-            (inv["invoice_code"], client_ids[inv["client_name"]], inv["status"]),
+            (
+                inv["invoice_code"], client_ids[inv["client_name"]], inv["status"],
+                staff_ids["admin@rabbiconsult.test"], staff_ids["ec@rabbiconsult.test"],
+            ),
         )
-        for job_id in inv["job_ids"]:
+        for line in inv["lines"]:
+            job_id = line["job_id"]
+            execute(
+                "INSERT INTO invoice_line (invoice_id, job_id, description, amount) "
+                "VALUES (%s, (SELECT id FROM job WHERE job_id = %s), %s, %s)",
+                (invoice_row["id"], job_id, line["description"], line["amount"]),
+            )
             execute(
                 "UPDATE job SET invoice_id = %s WHERE job_id = %s",
                 (invoice_row["id"], job_id),
