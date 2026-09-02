@@ -1,7 +1,8 @@
 """Billing: the invoice ledger. Every invoice is clickable — that opens the
-actual document, where it gets approved, rejected, or revised. Admin can
-also start a new invoice from here (the other entry point is a job's own
-detail page)."""
+actual document, where it gets approved, rejected, or revised. Admin also
+sees a ready-to-invoice register here: every done, unbilled job across every
+client, each with its own Create-invoice button (the other entry point is
+that same button on a job's own detail page)."""
 
 from __future__ import annotations
 
@@ -11,12 +12,14 @@ from core import models
 from core import ui
 from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, humanize
 
+_ROW_WIDTHS = [1.2, 1.6, 2.4, 1.3, 1.3]
+
 
 def render(user: dict) -> None:
     ui.page_header("Billing", _subtitle(user["role"]))
 
     if user["role"] == ROLE_ADMIN:
-        _start_new_invoice()
+        _ready_to_invoice()
         st.divider()
 
     _invoices_list()
@@ -24,23 +27,33 @@ def render(user: dict) -> None:
 
 def _subtitle(role: str) -> str:
     if role == ROLE_ADMIN:
-        return "Start a new invoice, or open one below."
+        return "Every done, unbilled job — create an invoice straight from the list."
     return "Every invoice — open one pending your approval to review it as a document."
 
 
-def _start_new_invoice() -> None:
-    st.markdown("#### Start a new invoice")
-    clients = models.list_clients(active_only=True)
-    client_map = {c["name"]: c for c in clients}
-    client_name = st.selectbox(
-        "Client", options=list(client_map.keys()), index=None,
-        placeholder="Select a client…", key="bill_new_client",
-    )
-    if client_name and st.button("Continue", key="bill_new_continue"):
-        st.session_state["invoice_seed_client"] = client_map[client_name]["id"]
-        st.session_state["invoice_seed_job"] = None
-        st.session_state["invoice_revise_id"] = None
-        ui.go_to_create_invoice()
+def _ready_to_invoice() -> None:
+    st.markdown("#### Ready to invoice")
+    jobs = models.list_done_unbilled_jobs()
+    if not jobs:
+        st.caption("Nothing done and unbilled right now.")
+        return
+
+    header = st.columns(_ROW_WIDTHS)
+    for col, label in zip(header, ["Job ID", "Client", "What", "Owner", ""]):
+        col.markdown(f"**{label}**")
+
+    for j in jobs:
+        cols = st.columns(_ROW_WIDTHS)
+        if cols[0].button(j["job_id"], key=f"readyjob_{j['id']}", type="tertiary"):
+            ui.go_to_job(j["id"])
+        cols[1].write(j["client_name"] or "—")
+        cols[2].write(j["title"])
+        cols[3].write(j["owner_name"] or "—")
+        if cols[4].button("Create invoice", key=f"readyinv_{j['id']}"):
+            st.session_state["invoice_seed_job"] = j["id"]
+            st.session_state["invoice_seed_client"] = None
+            st.session_state["invoice_revise_id"] = None
+            ui.go_to_create_invoice()
 
 
 def _invoices_list() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core import models
 from core import ui
 from core.auth import current_user, logout
 from core.bootstrap import bootstrap_once
@@ -27,6 +28,19 @@ st.set_page_config(page_title="Rabbi Core", page_icon="📋", layout="wide")
 
 ui.inject_theme()
 bootstrap_once()
+
+
+@st.cache_resource(ttl=300, show_spinner=False)
+def _sla_sweep_ticket() -> bool:
+    """Runs the SLA notification sweep at most once every 5 minutes across
+    every session sharing this process — SLA due/overdue only ever changes
+    at day granularity, so this stays cheap without ever going stale enough
+    to matter."""
+    models.sync_sla_notifications()
+    return True
+
+
+_sla_sweep_ticket()
 
 NAV = {
     ROLE_PRINCIPAL: [
@@ -62,6 +76,7 @@ def main() -> None:
     ui.sidebar_wordmark()
     st.sidebar.markdown(f"**{user['name']}**")
     st.sidebar.caption(ROLE_LABELS[user["role"]])
+    ui.notification_bell(user)
     st.sidebar.write("")
 
     page_names = [name for name, _ in pages]

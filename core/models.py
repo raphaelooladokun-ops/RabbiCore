@@ -8,7 +8,19 @@ from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
 
-from core.constants import STATUS_CLOSED, STATUS_DISMISSED, STATUS_DONE, STATUS_NEW, STATUS_IN_PROGRESS, RISK_RED, RISK_AMBER, RISK_GREEN, RISK_GREY
+from core.constants import (
+    RISK_AMBER,
+    RISK_GREEN,
+    RISK_GREY,
+    RISK_RED,
+    ROLE_SPECIALIST,
+    STATUS_BLOCKED,
+    STATUS_CLOSED,
+    STATUS_DISMISSED,
+    STATUS_DONE,
+    STATUS_IN_PROGRESS,
+    STATUS_NEW,
+)
 from core.db import execute, execute_returning, query, query_one
 
 STALL_HOURS = 48
@@ -93,7 +105,14 @@ def create_job(
             (row["id"], _json(attributes)),
         )
 
-    return get_job(row["id"])
+    job = get_job(row["id"])
+    owner = query_one("SELECT role FROM staff WHERE id = %s", (owner_id,))
+    if owner and owner["role"] == ROLE_SPECIALIST:
+        _create_notification(
+            owner_id, "assigned", "job", job["id"],
+            f"New job {job['job_id']}: {job['client_name'] or '—'} — {job['service_name'] or job['title']}",
+        )
+    return job
 
 
 def create_dismissed_job(
@@ -132,7 +151,8 @@ _JOB_SELECT = """
     SELECT j.*, c.name AS client_name, s.name AS owner_name,
            sc.name AS service_name, sc.pillar AS service_pillar,
            b.job_id AS blocked_by_job_code, b.status AS blocked_by_status, b.title AS blocked_by_title,
-           i.invoice_code AS invoice_code, i.status AS invoice_status
+           i.invoice_code AS invoice_code, i.status AS invoice_status,
+           (SELECT COUNT(*) FROM job d WHERE d.blocked_by = j.id AND d.status = 'blocked') AS blocking_count
     FROM job j
     LEFT JOIN client c ON c.id = j.client_id
     LEFT JOIN staff s ON s.id = j.owner_id
@@ -191,6 +211,12 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
     return query(_JOB_SELECT + " WHERE j.invoice_id = %s ORDER BY j.created_at", (invoice_id,))
 
 
+def list_done_unbilled_jobs() -> list:
+    """Every done, not-yet-invoiced job across all clients — the Billing
+    page's ready-to-invoice register."""
+    return query(_JOB_SELECT + " WHERE j.status = 'done' AND j.invoice_id IS NULL ORDER BY j.status_changed_at")
+
+
 def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = None) -> list:
     """Done jobs for this client not yet on any invoice, plus — when revising
     an existing invoice — the jobs already on THAT invoice, so the admin can
@@ -209,6 +235,12 @@ def get_job_extension(job_pk: int) -> dict:
     return row["attributes"] if row else {}
 
 
+def list_blocked_dependents(job_pk: int) -> list:
+    """Jobs currently blocked_by this one — used to surface, on the blocking
+    job itself, that it's holding up someone else's work."""
+    return query(_JOB_SELECT + " WHERE j.blocked_by = %s AND j.status = 'blocked'", (job_pk,))
+
+
 # ---------------------------------------------------------------------------
 # Job status changes
 # ---------------------------------------------------------------------------
@@ -216,7 +248,7 @@ class JobRuleError(Exception):
     pass
 
 
-def set_status(job_pk: int, new_status: str, reason: str | None = None) -> None:
+def set_status(job_pk: int, new_status: str, reason: str | None = None, actor_id: int | None = None) -> None:
     try:
         execute(
             "UPDATE job SET status = %s, status_reason = %s WHERE id = %s",
@@ -225,12 +257,19 @@ def set_status(job_pk: int, new_status: str, reason: str | None = None) -> None:
     except psycopg2.errors.RaiseException as e:
         raise JobRuleError(str(e).split("\n")[0]) from e
 
+    if new_status in (STATUS_DONE, STATUS_BLOCKED):
+        _notify_status_change(job_pk, new_status, reason, actor_id)
+    if new_status in (STATUS_DONE, STATUS_CLOSED):
+        _unblock_dependents(job_pk, actor_id)
 
-def set_blocked_by(job_pk: int, blocked_by_pk: int | None) -> None:
+
+def set_blocked_by(job_pk: int, blocked_by_pk: int | None, actor_id: int | None = None) -> None:
     try:
         execute("UPDATE job SET blocked_by = %s WHERE id = %s", (blocked_by_pk, job_pk))
     except psycopg2.errors.RaiseException as e:
         raise JobRuleError(str(e).split("\n")[0]) from e
+    if blocked_by_pk:
+        _notify_blocker_owner(job_pk, blocked_by_pk, actor_id)
 
 
 def update_job_fields(job_pk: int, **fields) -> None:
@@ -291,7 +330,14 @@ def create_invoice(client_id: int, invoice_code: str, invoice_date: date, create
             (invoice_id, line["job_id"], line["description"], line["amount"]),
         )
         execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, line["job_id"]))
-    return get_invoice(invoice_id)
+
+    result = get_invoice(invoice_id)
+    _notify_principals(
+        "invoice_submitted", "invoice", invoice_id,
+        f"Invoice {result['invoice_code']} submitted for approval — {result['client_name']}",
+        exclude_staff_id=created_by,
+    )
+    return result
 
 
 def revise_invoice(invoice_id: int, invoice_code: str, invoice_date: date, lines: list) -> dict:
@@ -320,7 +366,14 @@ def revise_invoice(invoice_id: int, invoice_code: str, invoice_date: date, lines
         )
     except psycopg2.errors.UniqueViolation as e:
         raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
-    return get_invoice(invoice_id)
+
+    result = get_invoice(invoice_id)
+    _notify_principals(
+        "invoice_submitted", "invoice", invoice_id,
+        f"Invoice {result['invoice_code']} resubmitted for approval — {result['client_name']}",
+        exclude_staff_id=result["created_by"],
+    )
+    return result
 
 
 def update_invoice_lines(invoice_id: int, lines: list) -> None:
@@ -339,6 +392,12 @@ def approve_invoice(invoice_id: int, approved_by: int) -> None:
         "UPDATE invoice SET status = 'approved', approved_by = %s, approved_at = now() WHERE id = %s",
         (approved_by, invoice_id),
     )
+    inv = get_invoice(invoice_id)
+    if inv["created_by"] and inv["created_by"] != approved_by:
+        _create_notification(
+            inv["created_by"], "invoice_approved", "invoice", invoice_id,
+            f"Invoice {inv['invoice_code']} approved — {inv['client_name']}",
+        )
 
 
 def reject_invoice(invoice_id: int, rejected_by: int, reason: str) -> None:
@@ -347,6 +406,12 @@ def reject_invoice(invoice_id: int, rejected_by: int, reason: str) -> None:
         "WHERE id = %s",
         (rejected_by, reason, invoice_id),
     )
+    inv = get_invoice(invoice_id)
+    if inv["created_by"] and inv["created_by"] != rejected_by:
+        _create_notification(
+            inv["created_by"], "invoice_rejected", "invoice", invoice_id,
+            f"Invoice {inv['invoice_code']} rejected — {reason}",
+        )
 
 
 def set_invoice_status(invoice_id: int, status: str) -> None:
@@ -454,6 +519,8 @@ def compute_risk(job: dict) -> str:
         return RISK_GREEN
     if status == STATUS_DISMISSED:
         return RISK_GREY
+    if job.get("blocking_count", 0) > 0:
+        return RISK_RED  # this job is holding up someone else's — surface it above everything
     if is_actually_blocked(job):
         return RISK_AMBER
     sla = job.get("sla_date")
@@ -501,3 +568,134 @@ def firm_summary() -> dict:
         "done_unbilled": done_unbilled,
         "red_flags": red_flags,
     }
+
+
+# ---------------------------------------------------------------------------
+# Notifications — each role is alerted when something needs them, instead of
+# having to discover it. One row per alert, linked to the job or invoice
+# it's about. No push: the bell re-reads on every rerun, same as every other
+# read in this app — see sync_sla_notifications() for the one case (a time
+# condition, not a write) that needs its own dedupe.
+# ---------------------------------------------------------------------------
+def _create_notification(staff_id: int, kind: str, link_type: str, link_id: int, message: str) -> None:
+    execute(
+        "INSERT INTO notification (staff_id, kind, link_type, link_id, message) VALUES (%s, %s, %s, %s, %s)",
+        (staff_id, kind, link_type, link_id, message),
+    )
+
+
+def _notify_principals(kind: str, link_type: str, link_id: int, message: str, exclude_staff_id: int | None = None) -> None:
+    for p in list_staff(role="principal"):
+        if p["id"] != exclude_staff_id:
+            _create_notification(p["id"], kind, link_type, link_id, message)
+
+
+def _notify_status_change(job_pk: int, new_status: str, reason: str | None, actor_id: int | None) -> None:
+    job = query_one(
+        "SELECT j.owner_id, j.job_id, j.title, c.name AS client_name FROM job j "
+        "LEFT JOIN client c ON c.id = j.client_id WHERE j.id = %s",
+        (job_pk,),
+    )
+    if not job:
+        return
+    label = "done" if new_status == STATUS_DONE else "blocked"
+    reason_part = f" — {reason}" if reason else ""
+    message = f"{job['job_id']} marked {label}: {job['client_name'] or '—'} — {job['title']}{reason_part}"
+    if job["owner_id"] and job["owner_id"] != actor_id:
+        _create_notification(job["owner_id"], f"status_{new_status}", "job", job_pk, message)
+    _notify_principals(f"status_{new_status}", "job", job_pk, message, exclude_staff_id=actor_id)
+
+
+def _unblock_dependents(blocker_pk: int, actor_id: int | None) -> None:
+    """When a job the guard forced others to wait on finishes, move each
+    waiting job back to in_progress automatically and tell its owner."""
+    blocker = query_one("SELECT job_id FROM job WHERE id = %s", (blocker_pk,))
+    dependents = query(
+        "SELECT j.id, j.owner_id, c.name AS client_name, j.title FROM job j "
+        "LEFT JOIN client c ON c.id = j.client_id WHERE j.blocked_by = %s AND j.status = %s",
+        (blocker_pk, STATUS_BLOCKED),
+    )
+    for dep in dependents:
+        execute("UPDATE job SET status = %s, status_reason = NULL WHERE id = %s", (STATUS_IN_PROGRESS, dep["id"]))
+        if dep["owner_id"]:
+            _create_notification(
+                dep["owner_id"], "unblocked", "job", dep["id"],
+                f"Unblocked: {blocker['job_id']} is done — {dep['client_name'] or '—'} — {dep['title']} can proceed",
+            )
+
+
+def _notify_blocker_owner(dependent_pk: int, blocker_pk: int, actor_id: int | None) -> None:
+    """The moment a dependency is created, tell the blocking job's owner —
+    even across modules/specialists — that their job is holding up another."""
+    blocker = query_one("SELECT owner_id, job_id FROM job WHERE id = %s", (blocker_pk,))
+    dependent = query_one(
+        "SELECT j.job_id, j.title, c.name AS client_name FROM job j "
+        "LEFT JOIN client c ON c.id = j.client_id WHERE j.id = %s",
+        (dependent_pk,),
+    )
+    if blocker and blocker["owner_id"] and blocker["owner_id"] != actor_id:
+        _create_notification(
+            blocker["owner_id"], "blocking", "job", blocker_pk,
+            f"Your job {blocker['job_id']} is blocking {dependent['job_id']} — "
+            f"{dependent['client_name'] or '—'} — {dependent['title']}",
+        )
+
+
+def list_notifications(staff_id: int, limit: int = 20) -> list:
+    return query(
+        "SELECT * FROM notification WHERE staff_id = %s ORDER BY created_at DESC LIMIT %s",
+        (staff_id, limit),
+    )
+
+
+def count_unread_notifications(staff_id: int) -> int:
+    row = query_one("SELECT count(*) AS n FROM notification WHERE staff_id = %s AND NOT read", (staff_id,))
+    return row["n"] if row else 0
+
+
+def mark_notification_read(notification_id: int) -> None:
+    execute("UPDATE notification SET read = TRUE WHERE id = %s", (notification_id,))
+
+
+def mark_all_notifications_read(staff_id: int) -> None:
+    execute("UPDATE notification SET read = TRUE WHERE staff_id = %s AND NOT read", (staff_id,))
+
+
+def sync_sla_notifications() -> None:
+    """One set-based sweep, safe to call often: flags jobs whose SLA is due
+    soon or already past to their owner. Dedupes against itself (NOT EXISTS)
+    so it doesn't re-notify for a condition it already flagged."""
+    execute(
+        """
+        INSERT INTO notification (staff_id, kind, link_type, link_id, message)
+        SELECT j.owner_id, 'sla_overdue', 'job', j.id,
+               'Overdue: ' || COALESCE(c.name, 'No client') || ' — ' || j.title
+        FROM job j
+        LEFT JOIN client c ON c.id = j.client_id
+        WHERE j.owner_id IS NOT NULL
+          AND j.sla_date IS NOT NULL AND j.sla_date < CURRENT_DATE
+          AND j.status NOT IN ('done', 'closed', 'dismissed')
+          AND NOT EXISTS (
+              SELECT 1 FROM notification n
+              WHERE n.staff_id = j.owner_id AND n.kind = 'sla_overdue' AND n.link_type = 'job' AND n.link_id = j.id
+          )
+        """
+    )
+    execute(
+        """
+        INSERT INTO notification (staff_id, kind, link_type, link_id, message)
+        SELECT j.owner_id, 'sla_due', 'job', j.id,
+               'Due soon: ' || COALESCE(c.name, 'No client') || ' — ' || j.title
+        FROM job j
+        LEFT JOIN client c ON c.id = j.client_id
+        WHERE j.owner_id IS NOT NULL
+          AND j.sla_date IS NOT NULL
+          AND j.sla_date >= CURRENT_DATE AND j.sla_date <= CURRENT_DATE + (%s * INTERVAL '1 day')
+          AND j.status NOT IN ('done', 'closed', 'dismissed')
+          AND NOT EXISTS (
+              SELECT 1 FROM notification n
+              WHERE n.staff_id = j.owner_id AND n.kind = 'sla_due' AND n.link_type = 'job' AND n.link_id = j.id
+          )
+        """,
+        (DUE_SOON_DAYS,),
+    )

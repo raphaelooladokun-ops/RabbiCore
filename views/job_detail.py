@@ -44,6 +44,7 @@ def render(user: dict, job_pk: int) -> None:
 
     _header(job)
     st.write("")
+    _blocking_alert(job)
     _info(job)
     st.divider()
 
@@ -52,9 +53,9 @@ def render(user: dict, job_pk: int) -> None:
     )
 
     if editable and job["status"] not in (STATUS_CLOSED, STATUS_DISMISSED):
-        _status_actions(job, key_prefix)
+        _status_actions(job, key_prefix, user["id"])
         st.divider()
-        _dependency_control(job, key_prefix)
+        _dependency_control(job, key_prefix, user["id"])
         st.divider()
         _notes_editor(job, key_prefix)
         st.divider()
@@ -78,6 +79,15 @@ def _header(job: dict) -> None:
         f'<div class="rc-page-subtitle" style="margin-top:0.5rem;">{job["title"]}</div>',
         unsafe_allow_html=True,
     )
+
+
+def _blocking_alert(job: dict) -> None:
+    """Surfaced prominently: this job is holding up someone else's work."""
+    if not job.get("blocking_count"):
+        return
+    dependents = models.list_blocked_dependents(job["id"])
+    names = ", ".join(f"{d['job_id']} ({d['owner_name'] or 'unassigned'})" for d in dependents)
+    st.error(f"⛔ Blocking {job['blocking_count']} other job(s) — {names}")
 
 
 def _info(job: dict) -> None:
@@ -113,7 +123,7 @@ def _info(job: dict) -> None:
         st.caption(f"Internal notes: {job['internal_notes']}")
 
 
-def _status_actions(job: dict, key_prefix: str) -> None:
+def _status_actions(job: dict, key_prefix: str, actor_id: int) -> None:
     st.markdown("#### Status")
     blocked_now = models.is_actually_blocked(job)
 
@@ -125,7 +135,7 @@ def _status_actions(job: dict, key_prefix: str) -> None:
 
     if status == STATUS_NEW:
         if st.button("Start work", key=f"{key_prefix}_start"):
-            _apply_status(job["id"], STATUS_IN_PROGRESS)
+            _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
 
     elif status == STATUS_IN_PROGRESS:
         c1, c2 = st.columns(2)
@@ -137,7 +147,7 @@ def _status_actions(job: dict, key_prefix: str) -> None:
                     if not reason.strip():
                         st.error("A reason is required to mark a job done.")
                     else:
-                        _apply_status(job["id"], STATUS_DONE, reason.strip())
+                        _apply_status(job["id"], STATUS_DONE, reason.strip(), actor_id)
         with c2:
             with st.form(key=f"{key_prefix}_block_form"):
                 st.write("Mark blocked")
@@ -146,16 +156,16 @@ def _status_actions(job: dict, key_prefix: str) -> None:
                     if not reason.strip():
                         st.error("A reason is required to mark a job blocked.")
                     else:
-                        _apply_status(job["id"], STATUS_BLOCKED, reason.strip())
+                        _apply_status(job["id"], STATUS_BLOCKED, reason.strip(), actor_id)
 
     elif status == STATUS_BLOCKED and not job["blocked_by"]:
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
-            _apply_status(job["id"], STATUS_IN_PROGRESS)
+            _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
 
 
-def _apply_status(job_pk: int, new_status: str, reason: str | None = None) -> None:
+def _apply_status(job_pk: int, new_status: str, reason: str | None = None, actor_id: int | None = None) -> None:
     try:
-        models.set_status(job_pk, new_status, reason)
+        models.set_status(job_pk, new_status, reason, actor_id=actor_id)
     except models.JobRuleError as e:
         st.error(str(e))
     else:
@@ -163,7 +173,7 @@ def _apply_status(job_pk: int, new_status: str, reason: str | None = None) -> No
         st.rerun()
 
 
-def _dependency_control(job: dict, key_prefix: str) -> None:
+def _dependency_control(job: dict, key_prefix: str, actor_id: int) -> None:
     with st.expander("Dependency"):
         candidates = [
             j for j in models.list_jobs(exclude_dismissed=True)
@@ -185,7 +195,7 @@ def _dependency_control(job: dict, key_prefix: str) -> None:
         )
         if st.button("Save dependency", key=f"{key_prefix}_savedep"):
             try:
-                models.set_blocked_by(job["id"], options[choice])
+                models.set_blocked_by(job["id"], options[choice], actor_id=actor_id)
             except models.JobRuleError as e:
                 st.error(str(e))
             else:

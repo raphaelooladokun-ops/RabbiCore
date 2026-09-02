@@ -94,6 +94,12 @@ def clear_all_nav() -> None:
     st.session_state[NAV_JOB_KEY] = None
     st.session_state[NAV_INVOICE_KEY] = None
     st.session_state[NAV_CREATE_INVOICE_KEY] = False
+    # Bump so any open popover (e.g. the notification bell) gets a fresh
+    # widget identity and defaults closed — Streamlit doesn't auto-close a
+    # popover just because a click inside it triggered a rerun that swapped
+    # out the whole page, so without this it stays open on top of wherever
+    # navigation just landed.
+    st.session_state["_nav_epoch"] = st.session_state.get("_nav_epoch", 0) + 1
 
 
 def back_button(label: str = "← Back") -> None:
@@ -134,6 +140,35 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
                 go_to_invoice(j["invoice_id"])
         else:
             cols[7].write("—")
+
+
+def notification_bell(user: dict) -> None:
+    """A bell in the sidebar showing unread alerts for this user — assigned
+    jobs, status changes, invoice events, SLA warnings, dependency alerts.
+    Each is clickable and jumps straight to the job or invoice it's about."""
+    unread = models.count_unread_notifications(user["id"])
+    label = f"🔔 {unread} new" if unread else "🔔 Notifications"
+    epoch = st.session_state.get("_nav_epoch", 0)
+    with st.sidebar.popover(label, use_container_width=True, key=f"notif_pop_{epoch}"):
+        st.markdown("**Notifications**")
+        notes = models.list_notifications(user["id"], limit=15)
+        if not notes:
+            st.caption("Nothing yet.")
+        for n in notes:
+            marker = "🔵 " if not n["read"] else ""
+            if st.button(
+                f"{marker}{n['message']}", key=f"notif_{n['id']}", type="tertiary", use_container_width=True
+            ):
+                models.mark_notification_read(n["id"])
+                if n["link_type"] == "job":
+                    go_to_job(n["link_id"])
+                else:
+                    go_to_invoice(n["link_id"])
+        if notes:
+            st.divider()
+            if st.button("Mark all read", key="notif_markall", use_container_width=True):
+                models.mark_all_notifications_read(user["id"])
+                st.rerun()
 
 
 def sidebar_wordmark() -> None:

@@ -133,6 +133,7 @@ DEMO_STAFF = [
     {"name": "EC (Principal)", "email": "ec@rabbiconsult.test", "role": "principal", "client_name": None},
     {"name": "Ops Coordinator", "email": "admin@rabbiconsult.test", "role": "admin", "client_name": None},
     {"name": "Chuka Nwosu", "email": "specialist@rabbiconsult.test", "role": "specialist", "client_name": None},
+    {"name": "Amara Bello", "email": "specialist2@rabbiconsult.test", "role": "specialist", "client_name": None},
     {"name": "Chidi Okafor", "email": "client@rabbiconsult.test", "role": "client", "client_name": "Demo Client Ltd"},
 ]
 

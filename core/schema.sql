@@ -190,6 +190,28 @@ CREATE INDEX IF NOT EXISTS idx_invoice_line_invoice_id ON invoice_line(invoice_i
 CREATE INDEX IF NOT EXISTS idx_invoice_line_job_id ON invoice_line(job_id);
 
 -- ---------------------------------------------------------------------------
+-- NOTIFICATION — so each role is alerted rather than having to discover
+-- things. link_type/link_id point at a job or an invoice (no single FK is
+-- possible across two target tables); resolved in the application layer.
+-- `kind` lets the SLA sweep dedupe against itself without suppressing other
+-- notification kinds for the same job.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS notification (
+    id              SERIAL PRIMARY KEY,
+    staff_id        INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL,
+    link_type       TEXT NOT NULL CHECK (link_type IN ('job', 'invoice')),
+    link_id         INTEGER NOT NULL,
+    message         TEXT NOT NULL,
+    read            BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_staff_id ON notification(staff_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_unread ON notification(staff_id) WHERE NOT read;
+CREATE INDEX IF NOT EXISTS idx_notification_dedup ON notification(staff_id, kind, link_type, link_id);
+
+-- ---------------------------------------------------------------------------
 -- STATUS GUARD — the rules the brief says the system must enforce, kept in
 -- the database so no future module or UI can bypass them:
 --   1. A job cannot become 'closed' without an invoice, and that invoice

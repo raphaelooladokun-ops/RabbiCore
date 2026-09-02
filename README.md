@@ -119,7 +119,46 @@ Change or remove these before using the app with real client data.
   and resubmitted. A job can't move to `closed` until its invoice is
   `approved` or `paid` — enforced by the same trigger that guards
   `blocked_by`. Every invoice is clickable everywhere it's referenced
-  (register, job detail, billing) and opens the same document page.
+  (register, job detail, billing) and opens the same document page. Billing's
+  admin view is a ready-to-invoice register (every done, unbilled job across
+  every client) rather than a pick-a-client-first dropdown — Create Invoice
+  is right there on each row, same as on a job's own detail page.
+- **Notifications:** a bell in the sidebar (`notification` table) alerts each
+  role to what needs them instead of making them go find it — a specialist
+  when a job is assigned to them, the owner and principal when a job is
+  marked done or blocked (with the reason), the principal when an invoice is
+  submitted, the submitting admin when it's approved or rejected, and job
+  owners when their SLA is due soon or past (a single set-based sweep,
+  cached 5 minutes, dedupes against itself so it never re-notifies for a
+  condition it already flagged). Every notification is clickable and jumps
+  straight to the job or invoice it's about.
+- **Cross-module dependency alerts:** setting `blocked_by` notifies the
+  *blocking* job's owner immediately, even across specialists/modules — "your
+  job is holding up someone else's." A job that's blocking another shows a
+  red alert on its own detail page and is forced to the top of every list
+  (`blocking_count`, a correlated subquery on every job read, takes priority
+  in `compute_risk()`). When the blocking job is marked done or closed, every
+  job waiting on it automatically moves back to `in_progress` and its owner
+  is notified it can proceed — no manual re-save needed.
+
+## Interconnection audit (batch 2)
+
+Checked whether any view could show stale or diverging data. Findings:
+- Zero raw SQL outside `models.py` — every view reads through the same
+  functions, and job reads all go through one shared `_JOB_SELECT`. There's
+  no second, parallel path that could drift from it.
+- `@st.cache_resource` is used in exactly two places — the Neon connection
+  pool object and the one-time (or 5-minutes-TTL, for the SLA sweep) setup
+  functions — never on query *results*. No `@st.cache_data` anywhere.
+  Every `models.*` call hits Postgres fresh on every rerun.
+- The only session-state a browser tab holds onto is its own identity and
+  navigation pointers (which job/invoice is open) — never a copy of job or
+  invoice data — so there's nothing to go stale between reruns.
+- The one honest limitation: this is a request-driven app, not push/realtime.
+  If User A has a job open and User B changes it elsewhere, A's page won't
+  update until A next interacts or reloads — normal for a UI without
+  websocket push, and out of scope here since re-adding polling would cut
+  against "don't degrade performance." Every actual *read* is always live.
 
 ## A judgement call worth flagging
 
