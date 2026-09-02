@@ -42,6 +42,23 @@ def get_client(client_id: int):
     return query_one("SELECT * FROM client WHERE id = %s", (client_id,))
 
 
+def create_client(
+    name: str,
+    rc_number: str | None = None,
+    contact_name: str | None = None,
+    contact_email: str | None = None,
+    contact_phone: str | None = None,
+) -> dict:
+    """Log a new client inline (e.g. from the Capture flow) without a
+    separate admin screen — the same 'active' client any other query sees."""
+    row = execute_returning(
+        "INSERT INTO client (name, rc_number, contact_name, contact_email, contact_phone, status) "
+        "VALUES (%s, %s, %s, %s, %s, 'active') RETURNING id",
+        (name, rc_number or None, contact_name or None, contact_email or None, contact_phone or None),
+    )
+    return get_client(row["id"])
+
+
 def list_staff(role: str | None = None, active_only: bool = True) -> list:
     sql = "SELECT * FROM staff WHERE 1=1"
     params = []
@@ -211,10 +228,27 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
     return query(_JOB_SELECT + " WHERE j.invoice_id = %s ORDER BY j.created_at", (invoice_id,))
 
 
-def list_done_unbilled_jobs() -> list:
-    """Every done, not-yet-invoiced job across all clients — the Billing
-    page's ready-to-invoice register."""
-    return query(_JOB_SELECT + " WHERE j.status = 'done' AND j.invoice_id IS NULL ORDER BY j.status_changed_at")
+def list_unbilled_jobs() -> list:
+    """Every not-yet-invoiced job across all clients, any status — the
+    Billing page's register, so nothing logged is invisible there. Done
+    jobs sort first since they're the only ones actually ready to invoice."""
+    return query(
+        _JOB_SELECT + " WHERE j.invoice_id IS NULL AND j.status <> 'dismissed' "
+        "ORDER BY (j.status = 'done') DESC, j.status_changed_at DESC"
+    )
+
+
+def find_potential_duplicate(client_id: int | None, service_type: str | None):
+    """The most recent still-open job for the same client + service, if any
+    — surfaced as a 'this may already exist' warning before logging another
+    one. Closed and dismissed jobs don't count as live duplicates."""
+    if not client_id or not service_type:
+        return None
+    return query_one(
+        _JOB_SELECT + " WHERE j.client_id = %s AND j.service_type = %s "
+        "AND j.status NOT IN ('dismissed', 'closed') ORDER BY j.created_at DESC LIMIT 1",
+        (client_id, service_type),
+    )
 
 
 def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = None) -> list:
@@ -296,10 +330,6 @@ def is_actually_blocked(job: dict) -> bool:
 # document and can edit amounts/descriptions, approve, or reject it back
 # to admin with a reason. Only admin can change which jobs are on it.
 # ---------------------------------------------------------------------------
-class InvoiceRuleError(Exception):
-    pass
-
-
 _INVOICE_SELECT = """
     SELECT i.*, c.name AS client_name, c.contact_name AS client_contact_name,
            c.contact_email AS client_contact_email,
@@ -312,18 +342,18 @@ _INVOICE_SELECT = """
 """
 
 
-def create_invoice(client_id: int, invoice_code: str, invoice_date: date, created_by: int, lines: list) -> dict:
+def create_invoice(client_id: int, invoice_date: date, created_by: int, lines: list) -> dict:
     """Admin-only: build and submit a new invoice for the principal's
-    approval. `lines` is a list of {job_id, description, amount}."""
-    try:
-        row = execute_returning(
-            "INSERT INTO invoice (invoice_code, client_id, status, created_by, invoice_date) "
-            "VALUES (%s, %s, 'pending_approval', %s, %s) RETURNING id",
-            (invoice_code, client_id, created_by, invoice_date),
-        )
-    except psycopg2.errors.UniqueViolation as e:
-        raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
+    approval. `lines` is a list of {job_id, description, amount}. The
+    invoice code is auto-generated (INV-{year}-{id:04d}) — never typed."""
+    row = execute_returning(
+        "INSERT INTO invoice (invoice_code, client_id, status, created_by, invoice_date) "
+        "VALUES (%s, %s, 'pending_approval', %s, %s) RETURNING id",
+        (_temp_code("INV"), client_id, created_by, invoice_date),
+    )
     invoice_id = row["id"]
+    invoice_code = f"INV-{date.today().year}-{invoice_id:04d}"
+    execute("UPDATE invoice SET invoice_code = %s WHERE id = %s", (invoice_code, invoice_id))
     for line in lines:
         execute(
             "INSERT INTO invoice_line (invoice_id, job_id, description, amount) VALUES (%s, %s, %s, %s)",
@@ -340,10 +370,11 @@ def create_invoice(client_id: int, invoice_code: str, invoice_date: date, create
     return result
 
 
-def revise_invoice(invoice_id: int, invoice_code: str, invoice_date: date, lines: list) -> dict:
-    """Admin-only: rework a rejected invoice's jobs/line items/code/date and
+def revise_invoice(invoice_id: int, invoice_date: date, lines: list) -> dict:
+    """Admin-only: rework a rejected invoice's jobs/line items/date and
     resubmit it. This is the only path that can change which jobs are on an
-    invoice once it's been created."""
+    invoice once it's been created. The invoice code is kept as-is — a
+    revision is still the same invoice, just corrected."""
     old_job_ids = {r["job_id"] for r in query("SELECT job_id FROM invoice_line WHERE invoice_id = %s", (invoice_id,))}
     new_job_ids = {line["job_id"] for line in lines}
 
@@ -358,14 +389,11 @@ def revise_invoice(invoice_id: int, invoice_code: str, invoice_date: date, lines
         )
         execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, line["job_id"]))
 
-    try:
-        execute(
-            "UPDATE invoice SET invoice_code = %s, invoice_date = %s, status = 'pending_approval', "
-            "rejection_reason = NULL, rejected_by = NULL, rejected_at = NULL WHERE id = %s",
-            (invoice_code, invoice_date, invoice_id),
-        )
-    except psycopg2.errors.UniqueViolation as e:
-        raise InvoiceRuleError(f"Invoice code '{invoice_code}' is already in use.") from e
+    execute(
+        "UPDATE invoice SET invoice_date = %s, status = 'pending_approval', "
+        "rejection_reason = NULL, rejected_by = NULL, rejected_at = NULL WHERE id = %s",
+        (invoice_date, invoice_id),
+    )
 
     result = get_invoice(invoice_id)
     _notify_principals(

@@ -10,9 +10,9 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, humanize
+from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, STATUS_DONE, STATUS_LABELS_SHORT, humanize
 
-_ROW_WIDTHS = [1.2, 1.6, 2.4, 1.3, 1.3]
+_ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.3]
 
 
 def render(user: dict) -> None:
@@ -27,33 +27,37 @@ def render(user: dict) -> None:
 
 def _subtitle(role: str) -> str:
     if role == ROLE_ADMIN:
-        return "Every done, unbilled job — create an invoice straight from the list."
+        return "Every unbilled job — create an invoice once it's done."
     return "Every invoice — open one pending your approval to review it as a document."
 
 
 def _ready_to_invoice() -> None:
     st.markdown("#### Ready to invoice")
-    jobs = models.list_done_unbilled_jobs()
+    jobs = models.list_unbilled_jobs()
     if not jobs:
-        st.caption("Nothing done and unbilled right now.")
+        st.caption("Nothing unbilled right now.")
         return
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["Job ID", "Client", "What", "Owner", ""]):
+    for col, label in zip(header, ["Job ID", "Client", "What", "Owner", "Status", ""]):
         col.markdown(f"**{label}**")
 
     for j in jobs:
         cols = st.columns(_ROW_WIDTHS)
-        if cols[0].button(j["job_id"], key=f"readyjob_{j['id']}", type="tertiary"):
+        if cols[0].button(ui.short_job_id(j["job_id"]), key=f"readyjob_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
         cols[1].write(j["client_name"] or "—")
         cols[2].write(j["title"])
         cols[3].write(j["owner_name"] or "—")
-        if cols[4].button("Create invoice", key=f"readyinv_{j['id']}"):
-            st.session_state["invoice_seed_job"] = j["id"]
-            st.session_state["invoice_seed_client"] = None
-            st.session_state["invoice_revise_id"] = None
-            ui.go_to_create_invoice()
+        cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
+        if j["status"] == STATUS_DONE:
+            if cols[5].button("Create invoice", key=f"readyinv_{j['id']}"):
+                st.session_state["invoice_seed_job"] = j["id"]
+                st.session_state["invoice_seed_client"] = None
+                st.session_state["invoice_revise_id"] = None
+                ui.go_to_create_invoice()
+        else:
+            cols[5].caption("Not done yet")
 
 
 def _invoices_list() -> None:

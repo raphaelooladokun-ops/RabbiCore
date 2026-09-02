@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, ROLE_PRINCIPAL, humanize
+from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SPECIALIST, humanize
 
 
 def render(user: dict, invoice_pk: int) -> None:
@@ -19,7 +19,14 @@ def render(user: dict, invoice_pk: int) -> None:
     if invoice is None:
         st.error("Invoice not found.")
         return
-    if user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL):
+
+    if user["role"] == ROLE_SPECIALIST:
+        # View-only: only if they own at least one job on this invoice.
+        invoice_jobs = models.list_jobs_for_invoice(invoice["id"])
+        if not any(j["owner_id"] == user["id"] for j in invoice_jobs):
+            st.error("You don't have access to this invoice.")
+            return
+    elif user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL):
         st.error("You don't have access to this invoice.")
         return
 
@@ -89,7 +96,7 @@ def _read_only_lines(lines: list, total: float) -> None:
     for line in lines:
         c1, c2, c3 = st.columns([3.5, 2, 1.5])
         c1.write(line["description"])
-        c2.caption(line["job_code"])
+        c2.caption(ui.short_job_id(line["job_code"]))
         c3.write(f"₦{float(line['amount']):,.2f}")
 
 
@@ -113,7 +120,7 @@ def _principal_review(user: dict, invoice: dict, lines: list) -> None:
                 "Description", value=line["description"], key=f"rev_desc_{line['id']}",
                 label_visibility="collapsed",
             )
-            c2.caption(line["job_code"])
+            c2.caption(ui.short_job_id(line["job_code"]))
             amount = c3.number_input(
                 "Amount", value=float(line["amount"]), min_value=0.0, step=500.0, format="%.2f",
                 key=f"rev_amt_{line['id']}", label_visibility="collapsed",

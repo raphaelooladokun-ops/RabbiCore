@@ -81,10 +81,29 @@ h1, h2, h3, h4, h5, h6,
 .stButton > button:focus:not(:active) {
     color: #FFFFFF;
 }
-button[kind="secondary"] {
+button[kind="secondary"],
+[data-testid="stBaseButton-secondary"] {
     background-color: #FFFFFF !important;
     color: var(--rc-navy) !important;
     border: 1px solid var(--rc-border) !important;
+}
+/* The sidebar forces all its text/icons to a light colour for contrast
+   against the navy background (see [data-testid="stSidebar"] * above) —
+   that rule and the secondary-button rule above can end up tied on
+   specificity depending on the Streamlit version's exact DOM markup, which
+   is what made "Log out" render as invisible white-on-white. Scope an
+   explicit, higher-specificity override to the sidebar so a secondary
+   button there always stays readable regardless of that drift. */
+[data-testid="stSidebar"] button[kind="secondary"],
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+    background-color: #FFFFFF !important;
+    color: var(--rc-navy) !important;
+    border: 1px solid var(--rc-border) !important;
+}
+[data-testid="stSidebar"] button[kind="secondary"]:hover,
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {
+    background-color: #EDEFF3 !important;
+    color: var(--rc-navy) !important;
 }
 
 /* ---- Cards / containers --------------------------------------------------*/
@@ -144,6 +163,22 @@ button[kind="secondary"] {
 .rc-badge-amber { background: rgba(245, 166, 35, 0.15); color: #8A5A00; }
 .rc-badge-green { background: rgba(26, 188, 156, 0.15); color: #0E7A63; }
 .rc-badge-grey { background: rgba(138, 148, 166, 0.15); color: #566073; }
+
+/* ---- Colour legend — explains what red/amber/green/grey mean, wherever
+   risk colours show up ---------------------------------------------------*/
+.rc-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    margin: 0.1rem 0 1.1rem 0;
+}
+.rc-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--rc-grey);
+}
 
 /* ---- Login screen --------------------------------------------------------*/
 .rc-login-wrap {

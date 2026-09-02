@@ -16,6 +16,7 @@ def render(user: dict) -> None:
     ui.page_header(f"Good to see you, {user['name'].split()[0]}", "Log requests, keep the register straight.")
 
     st.info("Nothing is worked until it's logged. Use **Capture** in the sidebar to log a request in seconds.")
+    ui.risk_legend()
 
     jobs = models.list_jobs(exclude_dismissed=True)
 

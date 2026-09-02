@@ -7,11 +7,12 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import SOURCE_CLIENT_EMAIL, SOURCE_LABELS, SOURCE_TEAM_GROUP_FORWARD
+from core.constants import SOURCE_CLIENT_EMAIL, SOURCE_LABELS, SOURCE_TEAM_GROUP_FORWARD, STATUS_LABELS_SHORT, humanize
 from core.seed_data import PILLAR_TO_CATEGORY
 
 MODE_JOB = "Log a job"
 MODE_DISMISS = "Dismiss — not a job"
+NEW_CLIENT_OPTION = "+ Add new client…"
 
 
 def render(user: dict) -> None:
@@ -41,10 +42,6 @@ def _job_form(user: dict) -> None:
     services = models.list_service_catalogue()
     staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
 
-    if not clients:
-        st.warning("No active clients yet. Add a client before logging a job.")
-        return
-
     client_map = {c["name"]: c for c in clients}
     service_map = {s["name"]: s for s in services}
     staff_map = {s["name"]: s for s in staff}
@@ -52,12 +49,24 @@ def _job_form(user: dict) -> None:
     col1, col2 = st.columns(2)
     with col1:
         client_name = st.selectbox(
-            "Client *", options=list(client_map.keys()), index=None, placeholder="Select client…", key="cap_client"
+            "Client *", options=[NEW_CLIENT_OPTION] + list(client_map.keys()), index=None,
+            placeholder="Select client…", key="cap_client",
         )
     with col2:
         service_name = st.selectbox(
             "Service *", options=list(service_map.keys()), index=None, placeholder="Select service…", key="cap_service"
         )
+
+    new_client_name = new_contact_name = new_contact_email = new_contact_phone = ""
+    if client_name == NEW_CLIENT_OPTION:
+        with st.container(border=True):
+            st.caption("New client — logged straight into the client list, no need to leave this screen.")
+            nc1, nc2 = st.columns(2)
+            new_client_name = nc1.text_input("Client name *", key="cap_newclient_name")
+            new_contact_name = nc2.text_input("Contact name", key="cap_newclient_contact")
+            nc3, nc4 = st.columns(2)
+            new_contact_email = nc3.text_input("Contact email", key="cap_newclient_email")
+            new_contact_phone = nc4.text_input("Contact phone", key="cap_newclient_phone")
 
     attributes: dict = {}
     if service_name:
@@ -95,14 +104,44 @@ def _job_form(user: dict) -> None:
             placeholder="e.g. Scanned copy of old CERPAC card",
         )
 
+    # A brand-new client can't already have a job on file, so duplicate
+    # detection only applies once an existing client + service are picked.
+    duplicate = None
+    if client_name and client_name != NEW_CLIENT_OPTION and service_name:
+        duplicate = models.find_potential_duplicate(client_map[client_name]["id"], service_map[service_name]["code"])
+
+    log_anyway = True
+    if duplicate:
+        st.warning(
+            f"⚠️ This job may already exist — {ui.short_job_id(duplicate['job_id'])} "
+            f"({STATUS_LABELS_SHORT.get(duplicate['status'], humanize(duplicate['status']))}), "
+            f"owned by {duplicate['owner_name'] or '—'}, logged {duplicate['created_at'].strftime('%d %b %Y')}."
+        )
+        log_anyway = st.checkbox("Log anyway — this is a separate, genuine request", key="cap_loganyway")
+
     st.write("")
     if st.button("Log job", type="primary", key="cap_submit"):
         if not client_name or not service_name or not owner_name:
             st.error("Client, service and owner are required.")
             return
+        if duplicate and not log_anyway:
+            st.error("Confirm this isn't a duplicate — check 'Log anyway' to continue.")
+            return
+
+        if client_name == NEW_CLIENT_OPTION:
+            if not new_client_name.strip():
+                st.error("Enter a name for the new client.")
+                return
+            client = models.create_client(
+                new_client_name.strip(),
+                contact_name=new_contact_name.strip() or None,
+                contact_email=new_contact_email.strip() or None,
+                contact_phone=new_contact_phone.strip() or None,
+            )
+        else:
+            client = client_map[client_name]
 
         service = service_map[service_name]
-        client = client_map[client_name]
         owner = staff_map[owner_name]
         category = PILLAR_TO_CATEGORY[service["pillar"]]
         title = description.strip() if description else service["name"]

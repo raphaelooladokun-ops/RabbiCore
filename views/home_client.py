@@ -20,6 +20,7 @@ def render(user: dict) -> None:
         st.warning("Your account isn't linked to a client yet. Contact Rabbi Consult.")
         return
 
+    ui.risk_legend()
     jobs = models.list_jobs(client_id=client["id"], exclude_dismissed=True)
 
     waiting = [j for j in jobs if j["waiting_on_client"] and j["status"] not in ("done", "closed")]

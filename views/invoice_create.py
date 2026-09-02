@@ -74,7 +74,7 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
     for j in jobs:
         default_checked = (j["id"] in existing_by_job) or (j["id"] == preselect_job_id)
         checked = st.checkbox(
-            f"{j['job_id']} — {j['title']}", value=default_checked, key=f"invsel_{j['id']}"
+            f"{ui.short_job_id(j['job_id'])} — {j['title']}", value=default_checked, key=f"invsel_{j['id']}"
         )
         if checked:
             selected[j["id"]] = j
@@ -90,7 +90,7 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
             default_amount = float(existing["amount"]) if existing else 0.0
             c1, c2 = st.columns([3, 1])
             desc = c1.text_input(
-                f"Description — {j['job_id']}", value=default_desc, key=f"invdesc_{job_id}"
+                f"Description — {ui.short_job_id(j['job_id'])}", value=default_desc, key=f"invdesc_{job_id}"
             )
             amount = c2.number_input(
                 "Amount (₦)", min_value=0.0, step=500.0, value=default_amount,
@@ -103,38 +103,26 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
         st.caption("Select at least one job.")
 
     st.write("")
-    col1, col2 = st.columns(2)
-    with col1:
-        invoice_code = st.text_input(
-            "Invoice code *", value=invoice["invoice_code"] if revising else "",
-            placeholder="e.g. INV-2026-014 or your accounting reference", key="inv_code",
-        )
-    with col2:
-        invoice_date = st.date_input(
-            "Invoice date", value=invoice["invoice_date"] if revising else date.today(), key="inv_date",
-        )
+    if revising:
+        st.caption(f"Invoice code **{invoice['invoice_code']}** stays the same on a revision.")
+    else:
+        st.caption("The invoice code is generated automatically once submitted.")
+    invoice_date = st.date_input(
+        "Invoice date", value=invoice["invoice_date"] if revising else date.today(), key="inv_date",
+    )
 
     st.write("")
     label = "Resubmit for approval" if revising else "Submit for approval"
     if st.button(label, type="primary", key="inv_submit"):
-        if not invoice_code.strip():
-            st.error("Enter an invoice code.")
-            return
         if not line_inputs:
             st.error("Select at least one job.")
             return
         if any(line["amount"] <= 0 for line in line_inputs):
             st.error("Every line item needs an amount greater than zero.")
             return
-        try:
-            if revising:
-                result = models.revise_invoice(invoice["id"], invoice_code.strip(), invoice_date, line_inputs)
-            else:
-                result = models.create_invoice(
-                    client["id"], invoice_code.strip(), invoice_date, user["id"], line_inputs
-                )
-        except models.InvoiceRuleError as e:
-            st.error(str(e))
-            return
+        if revising:
+            result = models.revise_invoice(invoice["id"], invoice_date, line_inputs)
+        else:
+            result = models.create_invoice(client["id"], invoice_date, user["id"], line_inputs)
         st.toast(f"{result['invoice_code']} submitted for approval.", icon="✅")
         ui.go_to_invoice(result["id"])

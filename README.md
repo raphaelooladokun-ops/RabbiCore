@@ -160,6 +160,87 @@ Checked whether any view could show stale or diverging data. Findings:
   websocket push, and out of scope here since re-adding polling would cut
   against "don't degrade performance." Every actual *read* is always live.
 
+## Fixes + batch 3 (clarity, UX, and a few real bugs)
+
+Six things reported directly against the deployed app, then six quick
+clarity/UX items:
+
+- **Billing was hiding newly-logged jobs.** It only ever queried
+  `status = 'done'` jobs, so anything still `new`/`in_progress` — like the
+  two jobs the user had just logged — was invisible there. Billing's
+  register now shows **every unbilled job, any status**, with a Status
+  column; **Create invoice** only lights up once a job is actually `done`
+  (the "no bill, no close" rule itself is untouched — this only fixes what's
+  *visible*, not what's *invoiceable*).
+- **Invoice codes are auto-generated** (`INV-{year}-{id:04d}`, same
+  insert-then-update-by-id trick already used for job codes) — the manual
+  "Invoice code \*" field is gone. Revising a rejected invoice keeps its
+  existing code; it's still the same invoice, just corrected.
+- **Accounting-format numbers** — audited every amount on screen (line
+  items, totals, expense logs); all of them were already rendered as
+  `₦{amount:,.2f}` (comma thousands, 2 decimals). No changes needed — this
+  was a "make sure," not a bug.
+- **Short job IDs in every list/table** — `#0008` instead of
+  `JOB-2026-0008` in the register, billing, and invoice line items, so
+  scanning a list of jobs doesn't mean reading the same 9-character prefix
+  over and over. The job's own detail page still shows the full code.
+- **Persistent login across a page reload.** Streamlit's `session_state`
+  doesn't survive a hard reload, so login now also drops a signed, 12-hour
+  token into the URL (`?s=...`) — HMAC-SHA256, stdlib only, keyed off a
+  hash of the Neon connection string already in secrets (no new secret to
+  configure). A reload with no live session re-derives it from that token
+  instead of bouncing to the login screen; logging out clears it.
+  **Trade-off worth knowing:** anyone who gets hold of that URL (a copied
+  link, a shared screenshot with the address bar visible) can use it to
+  sign in as that user until the token expires. Fine for an internal tool;
+  worth knowing if the URL is ever shared outside the firm.
+- **Specialists can now open an invoice covering a job they own** —
+  read-only. The access gate on the invoice document page and on a job's
+  own "Invoice" section now also admits a specialist who owns at least one
+  job on that invoice; every edit/approve/reject/revise/mark-paid control
+  was already gated to admin/principal specifically, so nothing else had to
+  change for this to be safely read-only.
+
+**Batch 3 — clarity and UX:**
+
+1. **Colour legend** — red/amber/green/grey now come with a small key
+   ("Expired / at risk", "Due / needs attention", "Done / ready",
+   "Monitoring") reusing the exact `RISK_LABELS` strings everywhere the
+   colours already lived, so there's one definition, not a re-authored copy.
+2. **Log out button was invisible** (white text on white). Root cause:
+   `requirements.txt` had `streamlit>=1.38` (unbounded), so the deployed
+   Cloud version could resolve differently from whatever was tested
+   locally, and Streamlit has changed the DOM markup for a "secondary"
+   button across versions (`kind="secondary"` vs.
+   `data-testid="stBaseButton-secondary"`). Fixed defensively (CSS now
+   targets both, with a higher-specificity sidebar-scoped override) *and*
+   preventively (`streamlit==1.62.0` pinned exactly, matching what's
+   actually tested against).
+3. **"Invoiced" is now a filterable status** in the register — it isn't a
+   real `job.status` value (touching the enum/trigger felt riskier than the
+   ask needed), so it's a derived filter: `done` AND already has an
+   `invoice_id`. All the real statuses (new, in progress, blocked, done,
+   closed) are now always offered as filter options too, even when no job
+   currently has one, rather than only appearing once a job exists with
+   that status.
+4. **Specialist screen reordered** — "Needs attention" (red/amber risk)
+   first, then "In progress," with everything else — including every
+   done/closed job — behind a collapsed "All my jobs" expander that reuses
+   the full filterable register. Finished work no longer eats the top of
+   the screen.
+5. **"+ Add new client" inline in Capture** — picking it reveals name/
+   contact fields right there; submitting the job creates the client first
+   (`models.create_client`), so a request for a brand-new client never
+   requires leaving the capture screen.
+6. **Duplicate-job warning.** Selecting a client + service that already has
+   a live (not dismissed/closed) job for that pairing shows "This job may
+   already exist," with the existing job's short ID, owner, and date;
+   submitting requires checking "Log anyway." Removing a genuine duplicate
+   reuses the same dismiss-with-reason mechanism as any other dismissal
+   (`status = 'dismissed'`, admin-only, via a "Mark as duplicate" action on
+   the job's own page) rather than a hard delete — the record and its audit
+   trail stay intact.
+
 ## A judgement call worth flagging
 
 The brief's `job.category` enum is `front_office | immigration | cit |

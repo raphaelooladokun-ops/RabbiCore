@@ -59,8 +59,12 @@ def render(user: dict, job_pk: int) -> None:
         st.divider()
         _notes_editor(job, key_prefix)
         st.divider()
+        _duplicate_control(job, key_prefix, user)
 
-    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] in (STATUS_DONE, STATUS_CLOSED):
+    show_invoice_section = (
+        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] in (STATUS_DONE, STATUS_CLOSED)
+    ) or (user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and job["invoice_code"])
+    if show_invoice_section:
         _invoice_section(job, user)
         st.divider()
 
@@ -215,6 +219,36 @@ def _notes_editor(job: dict, key_prefix: str) -> None:
             st.rerun()
 
 
+def _duplicate_control(job: dict, key_prefix: str, user: dict) -> None:
+    """Admin-only way to remove a genuine duplicate without a hard delete —
+    dismisses it with a reason, same as any other dismissal, so the record
+    and its audit trail stay intact."""
+    if user["role"] != ROLE_ADMIN:
+        return
+    with st.expander("Mark as duplicate"):
+        st.caption(
+            "If this job is a genuine duplicate of another one already logged, dismiss it here — "
+            "the record stays for audit, it just won't show as active work."
+        )
+        reason = st.text_input(
+            "Duplicate of / reason *", key=f"{key_prefix}_dupreason",
+            placeholder="e.g. Duplicate of JOB-2026-0007",
+        )
+        if st.button("Mark as duplicate", key=f"{key_prefix}_markdup"):
+            if not reason.strip():
+                st.error("Enter which job this duplicates, or why.")
+            else:
+                try:
+                    models.set_status(
+                        job["id"], STATUS_DISMISSED, f"Duplicate — {reason.strip()}", actor_id=user["id"]
+                    )
+                except models.JobRuleError as e:
+                    st.error(str(e))
+                else:
+                    st.toast("Marked as duplicate.", icon="✅")
+                    st.rerun()
+
+
 def _invoice_section(job: dict, user: dict) -> None:
     st.markdown("#### Invoice")
 
@@ -231,7 +265,7 @@ def _invoice_section(job: dict, user: dict) -> None:
                 st.session_state["invoice_revise_id"] = None
                 ui.go_to_create_invoice()
 
-    if job["status"] == STATUS_DONE and job["invoice_id"]:
+    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] == STATUS_DONE and job["invoice_id"]:
         if job["invoice_status"] not in ("approved", "paid"):
             st.info(f"Waiting on approval for invoice **{job['invoice_code']}** before this job can close.")
         else:

@@ -10,9 +10,13 @@ import streamlit as st
 from core import models
 from core.constants import (
     CATEGORY_LABELS,
+    RISK_AMBER,
     RISK_COLORS,
     RISK_EMOJI,
+    RISK_GREEN,
+    RISK_GREY,
     RISK_LABELS,
+    RISK_RED,
     SOURCE_LABELS,
     STATUS_LABELS_SHORT,
     humanize,
@@ -34,6 +38,26 @@ def page_header(title: str, subtitle: str | None = None) -> None:
     st.markdown(f'<div class="rc-page-title">{title}</div>', unsafe_allow_html=True)
     if subtitle:
         st.markdown(f'<div class="rc-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+
+
+def short_job_id(job_id: str | None) -> str:
+    """Last 4 characters of a job code for compact list/table display —
+    e.g. 'JOB-2026-0008' -> '#0008'. Detail pages always show the full code;
+    this is only for rows where many jobs are shown at once."""
+    if not job_id:
+        return "—"
+    return f"#{job_id[-4:]}"
+
+
+def risk_legend() -> None:
+    """A small colour key so red/amber/green/grey mean the same thing
+    everywhere they're used — placed wherever those badges/dots appear."""
+    items = "".join(
+        f'<span class="rc-legend-item">'
+        f'<span class="rc-dot" style="background:{RISK_COLORS[r]}"></span>{RISK_LABELS[r]}</span>'
+        for r in (RISK_RED, RISK_AMBER, RISK_GREEN, RISK_GREY)
+    )
+    st.markdown(f'<div class="rc-legend">{items}</div>', unsafe_allow_html=True)
 
 
 def risk_badge_html(risk: str) -> str:
@@ -128,7 +152,7 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
     for j in jobs:
         cols = st.columns(_TABLE_WIDTHS)
         cols[0].write(RISK_EMOJI[models.compute_risk(j)])
-        if cols[1].button(j["job_id"], key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
+        if cols[1].button(short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
             go_to_job(j["id"])
         cols[2].write(j.get("client_name") or "—")
         cols[3].write(j["title"])

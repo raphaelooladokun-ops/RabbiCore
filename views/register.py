@@ -17,11 +17,18 @@ from core.constants import (
     RISK_RED,
     STATUS_CLOSED,
     STATUS_DISMISSED,
+    STATUS_DONE,
     STATUS_LABELS_SHORT,
+    STATUSES_IN_ORDER,
     humanize,
 )
 
 RISK_ORDER = {RISK_RED: 0, RISK_AMBER: 1, RISK_GREY: 2, RISK_GREEN: 3}
+
+# "Invoiced" isn't a literal job.status value — it's done + already on an
+# invoice — so it's offered as a derived filter option rather than a new
+# entry in the status enum/trigger.
+_VIRTUAL_INVOICED = "invoiced"
 
 
 def render(
@@ -34,6 +41,7 @@ def render(
 ) -> None:
     if show_header:
         ui.page_header(title, subtitle)
+    ui.risk_legend()
     key_prefix = "own" if only_own else "reg"
 
     jobs = models.list_jobs(
@@ -61,9 +69,12 @@ def _triage_section(jobs: list, key_prefix: str) -> None:
 def _filters_and_table(jobs: list, only_own: bool, key_prefix: str) -> None:
     st.markdown("#### All jobs")
 
-    statuses_present = sorted({j["status"] for j in jobs})
-    status_labels = [STATUS_LABELS_SHORT.get(s, humanize(s)) for s in statuses_present]
-    label_to_status = dict(zip(status_labels, statuses_present))
+    # Every real status is always offered as a filter, whether or not any
+    # job currently has it — plus the derived "Invoiced" option (done AND
+    # already on an invoice, not a literal job.status value).
+    status_labels = [STATUS_LABELS_SHORT[s] for s in STATUSES_IN_ORDER] + ["Invoiced"]
+    label_to_status = dict(zip([STATUS_LABELS_SHORT[s] for s in STATUSES_IN_ORDER], STATUSES_IN_ORDER))
+    label_to_status["Invoiced"] = _VIRTUAL_INVOICED
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -89,7 +100,13 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str) -> None:
     filtered = jobs
     if status_choice:
         wanted = {label_to_status[s] for s in status_choice}
-        filtered = [j for j in filtered if j["status"] in wanted]
+        want_invoiced = _VIRTUAL_INVOICED in wanted
+        real_wanted = wanted - {_VIRTUAL_INVOICED}
+        filtered = [
+            j for j in filtered
+            if j["status"] in real_wanted
+            or (want_invoiced and j["status"] == STATUS_DONE and j["invoice_id"])
+        ]
     if not show_dismissed and not status_choice:
         filtered = [j for j in filtered if j["status"] != STATUS_DISMISSED]
     if client_choice != "All clients":

@@ -16,6 +16,7 @@ STATUS_FILTER_KEY = "principal_status_filter"
 
 def render(user: dict) -> None:
     ui.page_header(f"Good to see you, {user['name'].split()[0]}", "Firm-wide oversight — every job, every client.")
+    ui.risk_legend()
 
     summary = models.firm_summary()
     jobs = models.list_jobs(exclude_dismissed=True)

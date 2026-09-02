@@ -7,7 +7,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.auth import current_user, logout
+from core.auth import current_user, logout, restore_session_from_query_params
 from core.bootstrap import bootstrap_once
 from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST
 from views import (
@@ -65,6 +65,7 @@ NAV = {
 
 
 def main() -> None:
+    restore_session_from_query_params()
     user = current_user()
 
     if user is None:
