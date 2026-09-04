@@ -36,9 +36,18 @@ h1, h2, h3, h4, h5, h6,
     letter-spacing: -0.01em;
 }
 
-/* ---- Sidebar / nav ------------------------------------------------------ */
-[data-testid="stSidebar"] {
-    background-color: var(--rc-navy);
+/* ---- Sidebar / nav ------------------------------------------------------
+   Belt-and-braces: [theme.sidebar] in config.toml is the primary fix (a
+   stable public API, not an internal testid that can drift across Streamlit
+   releases) — these rules are a second layer in case that config is ever
+   missing or overridden. Every rule here carries !important: a bare
+   background-color here previously lost a specificity/load-order fight
+   against Streamlit's own theme-driven sidebar background on the deployed
+   version, which is exactly what made the sidebar read as near-white text
+   on a near-white background. */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"] {
+    background-color: var(--rc-navy) !important;
 }
 [data-testid="stSidebar"] * {
     color: #F2F5F8 !important;

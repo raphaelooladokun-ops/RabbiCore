@@ -105,11 +105,12 @@ def restore_session_from_query_params() -> None:
 def logout() -> None:
     st.session_state.pop(SESSION_KEY, None)
     for key in (
-        "nav_job_pk", "nav_invoice_pk", "nav_create_invoice",
+        "nav_job_pk", "nav_invoice_pk", "nav_create_invoice", "_current_page", "_nav_restored",
         "invoice_seed_job", "invoice_seed_client", "invoice_revise_id",
     ):
         st.session_state.pop(key, None)
-    st.query_params.pop(_TOKEN_PARAM, None)
+    for param in (_TOKEN_PARAM, "p", "j", "i", "ci"):
+        st.query_params.pop(param, None)
 
 
 def require_login() -> dict:

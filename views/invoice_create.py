@@ -1,7 +1,8 @@
 """Build or revise a real invoice: client (fixed, pulled from the seed job
-or a direct client pick), one or more done-but-unbilled jobs as line items
-with an editable description and amount, an invoice code and date. Admin
-only. Revising a rejected invoice reuses this same builder, pre-loaded."""
+or a direct client pick), one or more unbilled jobs — Rabbi invoices up
+front, so most are still 'new' — as line items with an editable description
+and amount, an invoice code and date. Admin only. Revising a rejected
+invoice reuses this same builder, pre-loaded."""
 
 from __future__ import annotations
 
@@ -64,7 +65,7 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
         client["id"], invoice_id=invoice["id"] if revising else None
     )
     if not jobs:
-        st.caption(f"No done, unbilled jobs for {client['name']}.")
+        st.caption(f"No unbilled jobs for {client['name']}.")
         return
 
     st.markdown("#### Jobs on this invoice")

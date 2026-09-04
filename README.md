@@ -29,6 +29,7 @@ core/
   models.py            # all queries and business rules — views never write SQL
   constants.py          # roles, statuses, colours, human-readable labels
   ui.py                  # theme injection, badges, page headers
+  pdf.py                  # renders an approved invoice as a downloadable PDF
 views/
   login.py, capture.py, register.py, billing.py, job_detail.py,
   home_principal.py, home_admin.py, home_specialist.py, home_client.py
@@ -240,6 +241,113 @@ clarity/UX items:
    (`status = 'dismissed'`, admin-only, via a "Mark as duplicate" action on
    the job's own page) rather than a hard delete — the record and its audit
    trail stay intact.
+
+## Batch 4 — invoice-before-work, role/blocking fixes, expenses, invoice lifecycle, sidebar/reload
+
+The biggest change in this batch is a genuine flow reversal: **Rabbi invoices
+up front, before work starts**, not after. Everything else in this batch is
+either a role/permission tightening, a real bug fix, or a UI addition.
+
+**A. Invoice-before-work.** The sequence is now: job logged → admin creates
+the invoice (available the moment a job is logged, any status — not just
+`done` anymore) → principal approves → specialist can start work. This is
+enforced in the same place every other hard rule lives — the
+`job_status_guard` trigger — not just the UI: a `new → in_progress` update
+now fails at the database unless the job's invoice exists and is `approved`
+or `paid`. A principal can override this per-job (`job.start_override_by/
+at/reason`, an audited exception, not a rule change) when work genuinely
+needs to start before approval; the specialist still clicks **Start work**
+themselves — the override only lifts the gate, it doesn't start the job.
+**Judgement call:** closing (`done → closed`) still requires the invoice to
+be approved/paid exactly as before — this batch only added a gate at the
+*start* of the job, it didn't touch the existing gate at the end.
+
+**B. Status/role rules.**
+- Confirmed unchanged: a job stays `new` until its specialist clicks **Start
+  work** themselves.
+- **Admin can no longer mark a job done or blocked** — only the specialist
+  who owns it, or the principal, can. Admin still sees the Status section
+  (so they can see what's blocking a job) but the Mark done/blocked forms
+  are gated to `ROLE_SPECIALIST`/`ROLE_PRINCIPAL`; a caption explains why
+  they're missing rather than the section silently vanishing.
+- Confirmed unchanged: marking done or blocked still requires a reason.
+
+**C. Blocking bugs.**
+- **Real bug, found and fixed:** the "Resume — in progress" button only
+  ever rendered when a blocked job had *no* `blocked_by` set
+  (`elif status == STATUS_BLOCKED and not job["blocked_by"]`) — so a job
+  that was blocked *by a dependency* had no way back to in-progress from
+  its own page even once that dependency resolved, if the automatic
+  unblock (`_unblock_dependents`, wired since batch 2) ever missed it for
+  any reason. Fixed the dead branch (any non-actually-blocked `blocked`
+  job can resume), and — belt-and-braces — added a self-healing sweep
+  (`_resync_stale_blocked()`) that runs on every job read: any job still
+  reading `blocked` whose blocker has since resolved is corrected back to
+  `in_progress` right there, rather than trusting a single write path to
+  have always caught it.
+- **Client-side blocking:** audited `waiting_on_client` — it's a
+  free-text note field only (capture, display, edit); nothing in the
+  status-transition code has ever checked or gated on it. Nothing to fix
+  there. The practical way a job *could* get stuck on something
+  client-side was really the dependency-resolution bug above (a job
+  logged purely to track "waiting on the client" that never gets marked
+  done would otherwise permanently block whatever depends on it) — the
+  fix in C covers this: the moment any blocking job resolves, everything
+  waiting on it is freed automatically, on every read, not just once.
+
+**D. Expenses.** The per-job expense log is now a real table (Description /
+Amount / Date / Added by columns) instead of a line-per-entry text block.
+Still admin-only to add (unchanged); the specialist who owns the job can
+now see it (read-only, no add form) alongside admin/principal, so more than
+one person can catch a wrong number, per the ask.
+
+**E. Comments.** Author name + timestamp were already shown on every
+comment (batch 1) — confirmed, no change needed. New: posting a comment now
+notifies the job's owner, every admin, and every principal (excluding
+whoever just posted it) — so a note from any one role reaches the other
+two, not just whoever happens to check the job next.
+
+**F. Invoice → payment lifecycle.** Three new invoice-detail actions, all
+admin-only:
+- **Download PDF** — a real downloadable document (fpdf2, pure-python, no
+  system dependency so it works the same on Streamlit Cloud), available
+  once an invoice is approved or paid.
+- **Mark sent to client** — records who and when (`invoice.sent_at/by`);
+  shown once approved. Kept as its own field rather than a new `status`
+  value, since "sent" is orthogonal to the approve → pay pipeline, not a
+  stage in it.
+- **Mark as paid** — now a small form requiring a payment reference *and*
+  a payment date; both are required, enforced in `models.mark_invoice_paid`
+  (raises rather than silently accepting an empty reference), not just a
+  disabled button.
+
+**G. UI/UX.**
+- **Sidebar contrast, root-caused this time.** `.streamlit/config.toml` had
+  `secondaryBackgroundColor = "#FFFFFF"` — Streamlit's own theme, which
+  governs the sidebar's default background before any custom CSS runs.
+  The CSS override (`[data-testid="stSidebar"] { background-color: ... }`)
+  had no `!important`, so on whichever exact Streamlit build is actually
+  serving the deployed app, the theme's white could still win the
+  specificity/order tie — forcing near-white sidebar *text* (which did
+  have `!important`) onto a background that hadn't actually turned navy.
+  Fixed at the root with Streamlit's own `[theme.sidebar]` config block
+  (a stable public API since 1.35, not an internal DOM testid that can
+  drift release to release) plus a hardened `!important` CSS layer as a
+  second line of defence.
+- **Page/section survives a reload.** The same URL that already carries the
+  signed login token (batch 3) now also carries the current page and, if
+  one is open, the job or invoice detail view (`?p=...&j=...&i=...`) —
+  kept in sync on every navigation and restored once per session on load,
+  so a hard reload lands back where the user was instead of bouncing to
+  Home.
+
+**Testing note:** the Playwright test harness for this batch hit a genuine
+tooling pitfall worth recording — `wait_until="networkidle"` is unreliable
+against a Streamlit app specifically because Streamlit holds a persistent
+WebSocket connection open, which can prevent the network from ever reading
+as "idle." Switched the test helpers to `wait_until="load"` plus a fixed
+settle delay; this is a test-infrastructure fix only, no application code
+was affected.
 
 ## A judgement call worth flagging
 

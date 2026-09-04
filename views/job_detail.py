@@ -53,7 +53,7 @@ def render(user: dict, job_pk: int) -> None:
     )
 
     if editable and job["status"] not in (STATUS_CLOSED, STATUS_DISMISSED):
-        _status_actions(job, key_prefix, user["id"])
+        _status_actions(job, key_prefix, user)
         st.divider()
         _dependency_control(job, key_prefix, user["id"])
         st.divider()
@@ -61,14 +61,20 @@ def render(user: dict, job_pk: int) -> None:
         st.divider()
         _duplicate_control(job, key_prefix, user)
 
+    # Rabbi invoices up front — as soon as a job is logged, not only once it's
+    # done — so this section (and Create invoice within it) is available at
+    # any non-dismissed status for admin/principal, not gated to done/closed.
     show_invoice_section = (
-        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] in (STATUS_DONE, STATUS_CLOSED)
+        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] != STATUS_DISMISSED
     ) or (user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and job["invoice_code"])
     if show_invoice_section:
         _invoice_section(job, user)
         st.divider()
 
-    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL):
+    can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) or (
+        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
+    )
+    if can_see_expenses:
         _expenses(job, user)
         st.divider()
 
@@ -127,8 +133,10 @@ def _info(job: dict) -> None:
         st.caption(f"Internal notes: {job['internal_notes']}")
 
 
-def _status_actions(job: dict, key_prefix: str, actor_id: int) -> None:
+def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
     st.markdown("#### Status")
+    actor_id = user["id"]
+    role = user["role"]
     blocked_now = models.is_actually_blocked(job)
 
     if blocked_now:
@@ -138,31 +146,54 @@ def _status_actions(job: dict, key_prefix: str, actor_id: int) -> None:
     status = job["status"]
 
     if status == STATUS_NEW:
-        if st.button("Start work", key=f"{key_prefix}_start"):
-            _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
+        can_start, block_reason = models.can_start_work(job)
+        if can_start:
+            if job.get("start_override_by"):
+                st.caption(f"Principal override on file — {job.get('start_override_reason') or 'start allowed'}.")
+            if st.button("Start work", key=f"{key_prefix}_start"):
+                _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
+        else:
+            st.info(f"Can't start yet — {block_reason}")
+            if role == ROLE_PRINCIPAL:
+                with st.form(key=f"{key_prefix}_override_form"):
+                    st.write("Allow this job to start without an approved invoice")
+                    reason = st.text_input("Reason for the override *", key=f"{key_prefix}_override_reason")
+                    if st.form_submit_button("Allow start"):
+                        if not reason.strip():
+                            st.error("A reason is required to override the invoice gate.")
+                        else:
+                            models.set_start_override(job["id"], actor_id, reason.strip())
+                            st.toast("Override recorded — the specialist can now start work.", icon="✅")
+                            st.rerun()
 
     elif status == STATUS_IN_PROGRESS:
-        c1, c2 = st.columns(2)
-        with c1:
-            with st.form(key=f"{key_prefix}_done_form"):
-                st.write("Mark done")
-                reason = st.text_area("What was completed? *", key=f"{key_prefix}_done_reason")
-                if st.form_submit_button("Mark done"):
-                    if not reason.strip():
-                        st.error("A reason is required to mark a job done.")
-                    else:
-                        _apply_status(job["id"], STATUS_DONE, reason.strip(), actor_id)
-        with c2:
-            with st.form(key=f"{key_prefix}_block_form"):
-                st.write("Mark blocked")
-                reason = st.text_area("What is this blocked on? *", key=f"{key_prefix}_block_reason")
-                if st.form_submit_button("Mark blocked"):
-                    if not reason.strip():
-                        st.error("A reason is required to mark a job blocked.")
-                    else:
-                        _apply_status(job["id"], STATUS_BLOCKED, reason.strip(), actor_id)
+        if role in (ROLE_SPECIALIST, ROLE_PRINCIPAL):
+            c1, c2 = st.columns(2)
+            with c1:
+                with st.form(key=f"{key_prefix}_done_form"):
+                    st.write("Mark done")
+                    reason = st.text_area("What was completed? *", key=f"{key_prefix}_done_reason")
+                    if st.form_submit_button("Mark done"):
+                        if not reason.strip():
+                            st.error("A reason is required to mark a job done.")
+                        else:
+                            _apply_status(job["id"], STATUS_DONE, reason.strip(), actor_id)
+            with c2:
+                with st.form(key=f"{key_prefix}_block_form"):
+                    st.write("Mark blocked")
+                    reason = st.text_area("What is this blocked on? *", key=f"{key_prefix}_block_reason")
+                    if st.form_submit_button("Mark blocked"):
+                        if not reason.strip():
+                            st.error("A reason is required to mark a job blocked.")
+                        else:
+                            _apply_status(job["id"], STATUS_BLOCKED, reason.strip(), actor_id)
+        else:
+            st.caption("Only the specialist on this job, or the principal, can mark it done or blocked.")
 
-    elif status == STATUS_BLOCKED and not job["blocked_by"]:
+    elif status == STATUS_BLOCKED:
+        # Reaching here means blocked_now was False above — the dependency
+        # (if any) is resolved, or this was a manual block with no
+        # dependency — either way, resuming is always available.
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
             _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
 
@@ -258,7 +289,7 @@ def _invoice_section(job: dict, user: dict) -> None:
             ui.go_to_invoice(job["invoice_id"])
     else:
         st.caption("Not yet invoiced.")
-        if user["role"] == ROLE_ADMIN and job["status"] == STATUS_DONE:
+        if user["role"] == ROLE_ADMIN and job["status"] != STATUS_DISMISSED:
             if st.button("Create invoice", key=f"jd_createinv_{job['id']}", type="primary"):
                 st.session_state["invoice_seed_job"] = job["id"]
                 st.session_state["invoice_seed_client"] = None
@@ -279,16 +310,24 @@ def _invoice_section(job: dict, user: dict) -> None:
                     st.rerun()
 
 
+_EXPENSE_WIDTHS = [2.6, 1.3, 1.1, 1.4]
+
+
 def _expenses(job: dict, user: dict) -> None:
     st.markdown("#### Expenses")
     expenses = models.list_job_expenses(job["id"])
     if expenses:
-        total = sum(e["amount"] for e in expenses)
+        header = st.columns(_EXPENSE_WIDTHS)
+        for col, label in zip(header, ["Description", "Amount", "Date", "Added by"]):
+            col.markdown(f"**{label}**")
+        total = 0.0
         for e in expenses:
-            st.write(
-                f"{e['expense_date'].isoformat()} — {e['description']} — ₦{e['amount']:,.2f}"
-                f"  \n_added by {e['created_by_name'] or '—'}_"
-            )
+            cols = st.columns(_EXPENSE_WIDTHS)
+            cols[0].write(e["description"])
+            cols[1].write(f"₦{float(e['amount']):,.2f}")
+            cols[2].write(e["expense_date"].isoformat())
+            cols[3].write(e["created_by_name"] or "—")
+            total += float(e["amount"])
         st.caption(f"Total logged: ₦{total:,.2f}")
     else:
         st.caption("No expenses logged yet.")

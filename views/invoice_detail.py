@@ -1,13 +1,17 @@
 """The invoice document — laid out like a real invoice (bill-to, line
 items, total), not a form. Principal can edit amounts/descriptions and
-approve, or reject with a reason; admin can revise a rejected invoice or
-mark an approved one paid."""
+approve, or reject with a reason; admin can revise a rejected invoice, mark
+it sent to the client, or mark it paid. A downloadable PDF is available once
+it's approved."""
 
 from __future__ import annotations
+
+from datetime import date
 
 import streamlit as st
 
 from core import models
+from core import pdf as pdf_module
 from core import ui
 from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SPECIALIST, humanize
 
@@ -45,18 +49,52 @@ def render(user: dict, invoice_pk: int) -> None:
     else:
         _read_only_lines(lines, total)
 
+    _lifecycle_actions(user, invoice, lines, total)
+
+
+def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> None:
     if user["role"] == ROLE_ADMIN and invoice["status"] == "rejected":
         st.write("")
         if st.button("Revise & resubmit", type="primary", key="inv_revise"):
             st.session_state["invoice_revise_id"] = invoice["id"]
             ui.go_to_create_invoice()
 
+    if invoice["status"] in ("approved", "paid") and user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL):
+        st.write("")
+        pdf_bytes = pdf_module.build_invoice_pdf(invoice, lines, total)
+        st.download_button(
+            "Download PDF", data=pdf_bytes, file_name=f"{invoice['invoice_code']}.pdf",
+            mime="application/pdf", key="inv_pdf",
+        )
+
+    if user["role"] == ROLE_ADMIN and invoice["status"] in ("approved", "paid"):
+        st.write("")
+        if invoice.get("sent_at"):
+            st.caption(f"Sent to client on {invoice['sent_at'].strftime('%d %b %Y')}.")
+        else:
+            if st.button("Mark sent to client", key="inv_marksent"):
+                models.mark_invoice_sent(invoice["id"], user["id"])
+                st.toast("Marked sent to client.", icon="✅")
+                st.rerun()
+
     if user["role"] == ROLE_ADMIN and invoice["status"] == "approved":
         st.write("")
-        if st.button("Mark paid", key="inv_markpaid"):
-            models.set_invoice_status(invoice["id"], "paid")
-            st.toast("Marked paid.", icon="✅")
-            st.rerun()
+        with st.expander("Mark as paid"):
+            with st.form(key="inv_paid_form"):
+                reference = st.text_input("Payment reference *", key="inv_payref")
+                payment_date = st.date_input("Payment date *", value=date.today(), key="inv_paydate")
+                if st.form_submit_button("Mark paid"):
+                    try:
+                        models.mark_invoice_paid(invoice["id"], reference, payment_date)
+                    except models.InvoicePaymentError as e:
+                        st.error(str(e))
+                    else:
+                        st.toast("Marked paid.", icon="✅")
+                        st.rerun()
+
+    if invoice["status"] == "paid":
+        paid_on = invoice["payment_date"].isoformat() if invoice.get("payment_date") else "—"
+        st.caption(f"Paid — ref {invoice.get('payment_reference') or '—'}, {paid_on}.")
 
 
 def _document_header(invoice: dict, total: float) -> None:

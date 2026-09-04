@@ -5,5 +5,17 @@ secondaryBackgroundColor = "#FFFFFF"
 textColor = "#0A2540"
 font = "sans serif"
 
+# Native sidebar theming (Streamlit 1.35+) — this is the primary fix for the
+# sidebar's low-contrast/invisible-button bug. Custom CSS selectors that
+# target internal testids (e.g. [data-testid="stSidebar"]) can silently stop
+# matching across Streamlit point releases; this [theme.sidebar] section is
+# a stable, versioned public API that always wins, so the navy background +
+# light text no longer depend on our CSS overrides working at all. The CSS
+# in assets/style.css keeps its own sidebar rules too, as a second layer.
+[theme.sidebar]
+backgroundColor = "#0A2540"
+secondaryBackgroundColor = "#123A63"
+textColor = "#F2F5F8"
+
 [browser]
 gatherUsageStats = false

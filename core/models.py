@@ -13,6 +13,8 @@ from core.constants import (
     RISK_GREEN,
     RISK_GREY,
     RISK_RED,
+    ROLE_ADMIN,
+    ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     STATUS_BLOCKED,
     STATUS_CLOSED,
@@ -179,11 +181,42 @@ _JOB_SELECT = """
 """
 
 
+def _resync_stale_blocked() -> None:
+    """Safety net: a job stays showing 'blocked' until something re-saves it
+    even after its blocker resolves (_unblock_dependents does that eagerly
+    the moment the blocker is marked done/closed) — but if that ever gets
+    missed, a job could be stuck reading 'blocked' forever with no dependency
+    left to actually wait on. Self-heal on every read instead of trusting a
+    single write path: idempotent, and a no-op once nothing is stale."""
+    stale = query(
+        """
+        SELECT j.id, j.owner_id, j.title, c.name AS client_name, b.job_id AS blocker_job_id
+        FROM job j
+        JOIN job b ON b.id = j.blocked_by
+        LEFT JOIN client c ON c.id = j.client_id
+        WHERE j.status = 'blocked' AND b.status IN ('done', 'closed')
+        """
+    )
+    for row in stale:
+        execute(
+            "UPDATE job SET status = %s, status_reason = NULL WHERE id = %s",
+            (STATUS_IN_PROGRESS, row["id"]),
+        )
+        if row["owner_id"]:
+            _create_notification(
+                row["owner_id"], "unblocked", "job", row["id"],
+                f"Unblocked: {row['blocker_job_id']} is done — {row['client_name'] or '—'} — "
+                f"{row['title']} can proceed",
+            )
+
+
 def get_job(job_pk: int):
+    _resync_stale_blocked()
     return query_one(_JOB_SELECT + " WHERE j.id = %s", (job_pk,))
 
 
 def get_job_by_job_id(job_id: str):
+    _resync_stale_blocked()
     return query_one(_JOB_SELECT + " WHERE j.job_id = %s", (job_id,))
 
 
@@ -197,6 +230,7 @@ def list_jobs(
     exclude_dismissed: bool = False,
     search: str | None = None,
 ) -> list:
+    _resync_stale_blocked()
     sql = _JOB_SELECT + " WHERE 1=1"
     params: list = []
     if status:
@@ -229,12 +263,12 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
 
 
 def list_unbilled_jobs() -> list:
-    """Every not-yet-invoiced job across all clients, any status — the
-    Billing page's register, so nothing logged is invisible there. Done
-    jobs sort first since they're the only ones actually ready to invoice."""
+    """Every not-yet-invoiced job across all clients, any status — Rabbi
+    invoices up front, so a freshly logged job is exactly as invoiceable as
+    a finished one. Newest first."""
     return query(
         _JOB_SELECT + " WHERE j.invoice_id IS NULL AND j.status <> 'dismissed' "
-        "ORDER BY (j.status = 'done') DESC, j.status_changed_at DESC"
+        "ORDER BY j.created_at DESC"
     )
 
 
@@ -252,10 +286,11 @@ def find_potential_duplicate(client_id: int | None, service_type: str | None):
 
 
 def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = None) -> list:
-    """Done jobs for this client not yet on any invoice, plus — when revising
-    an existing invoice — the jobs already on THAT invoice, so the admin can
+    """Not-yet-invoiced jobs for this client, any status — Rabbi invoices up
+    front, so most of these will still be 'new' — plus, when revising an
+    existing invoice, the jobs already on THAT invoice, so the admin can
     review and adjust its composition."""
-    sql = _JOB_SELECT + " WHERE j.client_id = %s AND j.status = 'done' AND (j.invoice_id IS NULL"
+    sql = _JOB_SELECT + " WHERE j.client_id = %s AND j.status <> 'dismissed' AND (j.invoice_id IS NULL"
     params: list = [client_id]
     if invoice_id:
         sql += " OR j.invoice_id = %s"
@@ -322,6 +357,31 @@ def is_actually_blocked(job: dict) -> bool:
     the stored `status`, which may still read 'blocked' after the blocker
     resolves until someone re-saves the job."""
     return job.get("blocked_by") is not None and job.get("blocked_by_status") not in (STATUS_DONE, STATUS_CLOSED)
+
+
+def can_start_work(job: dict) -> tuple[bool, str | None]:
+    """Rabbi invoices up front: whether this job is allowed to move
+    new -> in_progress right now, and if not, why. Mirrors the DB trigger's
+    own rule so the UI can explain the block instead of just failing on
+    submit. A principal's start_override always lifts the gate."""
+    if job.get("start_override_by"):
+        return True, None
+    if not job.get("invoice_id"):
+        return False, "This job hasn't been invoiced yet."
+    if job.get("invoice_status") not in ("approved", "paid"):
+        return False, "Invoiced, but waiting on the principal to approve the invoice."
+    return True, None
+
+
+def set_start_override(job_pk: int, principal_id: int, reason: str) -> None:
+    """Principal-only: let a specialist start work on this job even though it
+    hasn't been invoiced yet, or the invoice isn't approved yet. Recorded
+    with who/when/why for audit — the specialist still has to click Start
+    work themselves; this only lifts the gate."""
+    execute(
+        "UPDATE job SET start_override_by = %s, start_override_at = now(), start_override_reason = %s WHERE id = %s",
+        (principal_id, reason, job_pk),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -442,11 +502,30 @@ def reject_invoice(invoice_id: int, rejected_by: int, reason: str) -> None:
         )
 
 
-def set_invoice_status(invoice_id: int, status: str) -> None:
-    """Admin bookkeeping step (currently just 'paid') — approval/rejection
-    have their own functions above since they also record who and when."""
-    extra = ", paid_at = now()" if status == "paid" else ""
-    execute(f"UPDATE invoice SET status = %s{extra} WHERE id = %s", (status, invoice_id))
+def mark_invoice_sent(invoice_id: int, sent_by: int) -> None:
+    """Admin bookkeeping: records that the (already-approved) invoice has
+    actually been sent to the client. Orthogonal to status — sent-ness
+    doesn't gate approval or payment."""
+    execute("UPDATE invoice SET sent_at = now(), sent_by = %s WHERE id = %s", (sent_by, invoice_id))
+
+
+class InvoicePaymentError(Exception):
+    pass
+
+
+def mark_invoice_paid(invoice_id: int, payment_reference: str, payment_date: date) -> None:
+    """Admin-only: close out an invoice as paid. A payment reference and
+    date are required — this is the actual accounting record of the
+    payment, not just a status flip."""
+    if not payment_reference or not payment_reference.strip():
+        raise InvoicePaymentError("A payment reference is required to mark an invoice paid.")
+    if not payment_date:
+        raise InvoicePaymentError("A payment date is required to mark an invoice paid.")
+    execute(
+        "UPDATE invoice SET status = 'paid', paid_at = now(), payment_reference = %s, payment_date = %s "
+        "WHERE id = %s",
+        (payment_reference.strip(), payment_date, invoice_id),
+    )
 
 
 def get_invoice(invoice_id: int):
@@ -522,6 +601,30 @@ def add_job_comment(job_id: int, author_id: int, body: str) -> None:
         "INSERT INTO job_comment (job_id, author_id, body) VALUES (%s, %s, %s)",
         (job_id, author_id, body),
     )
+    _notify_comment(job_id, author_id)
+
+
+def _notify_comment(job_pk: int, author_id: int) -> None:
+    """Everyone with a stake in the job — its owner, every admin, every
+    principal — gets told about a new comment, so a note posted by one role
+    doesn't sit unseen by the others."""
+    job = query_one(
+        "SELECT j.owner_id, j.job_id, j.title, c.name AS client_name, s.name AS author_name "
+        "FROM job j LEFT JOIN client c ON c.id = j.client_id JOIN staff s ON s.id = %s "
+        "WHERE j.id = %s",
+        (author_id, job_pk),
+    )
+    if not job:
+        return
+    message = f"{job['author_name']} commented on {job['job_id']}: {job['client_name'] or '—'} — {job['title']}"
+    recipients = set()
+    if job["owner_id"] and job["owner_id"] != author_id:
+        recipients.add(job["owner_id"])
+    for s in list_staff(role=ROLE_ADMIN) + list_staff(role=ROLE_PRINCIPAL):
+        if s["id"] != author_id:
+            recipients.add(s["id"])
+    for staff_id in recipients:
+        _create_notification(staff_id, "comment", "job", job_pk, message)
 
 
 def list_job_comments(job_id: int) -> list:

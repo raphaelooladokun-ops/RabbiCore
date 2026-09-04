@@ -126,6 +126,52 @@ def clear_all_nav() -> None:
     st.session_state["_nav_epoch"] = st.session_state.get("_nav_epoch", 0) + 1
 
 
+_NAV_QUERY_KEYS = ("p", "j", "i", "ci")
+
+
+def sync_nav_query_params() -> None:
+    """Mirror the current page/job/invoice navigation into the URL so a hard
+    reload lands back on the same page/section instead of bouncing to Home
+    — the login token already survives a reload (see core/auth.py); this
+    does the same for *where* the user was, not just *who* they were."""
+    current = {
+        "p": st.session_state.get("_current_page"),
+        "j": st.session_state.get(NAV_JOB_KEY),
+        "i": st.session_state.get(NAV_INVOICE_KEY),
+        "ci": "1" if st.session_state.get(NAV_CREATE_INVOICE_KEY) else None,
+    }
+    for key in _NAV_QUERY_KEYS:
+        value = current[key]
+        if value:
+            st.query_params[key] = str(value)
+        else:
+            st.query_params.pop(key, None)
+
+
+def restore_nav_from_query_params(page_names: list) -> None:
+    """Called once per session, right after login resolves: if there's no
+    navigation state yet in session_state (a fresh session_state, whether
+    from a first visit or a hard reload re-authenticated via the login
+    token), pick it back up from the URL instead of defaulting to the first
+    page. After this first restore, session_state — kept in sync with the
+    URL by sync_nav_query_params() — is the source of truth."""
+    if st.session_state.get("_nav_restored"):
+        return
+    st.session_state["_nav_restored"] = True
+
+    page = st.query_params.get("p")
+    if page in page_names:
+        st.session_state["_current_page"] = page
+
+    for key, param in ((NAV_JOB_KEY, "j"), (NAV_INVOICE_KEY, "i")):
+        value = st.query_params.get(param)
+        if value and value.isdigit():
+            st.session_state[key] = int(value)
+
+    if st.query_params.get("ci") == "1":
+        st.session_state[NAV_CREATE_INVOICE_KEY] = True
+
+
 def back_button(label: str = "← Back") -> None:
     if st.button(label, key=f"back_{label}"):
         clear_all_nav()

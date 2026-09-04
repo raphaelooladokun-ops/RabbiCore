@@ -71,6 +71,18 @@ ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejected_by INTEGER REFERENCES staff(id);
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
 
+-- "Sent to client" is tracked separately from status (pending/approved/paid)
+-- since it's an orthogonal bookkeeping step, not a lifecycle stage — an
+-- approved invoice gets sent, then later paid; sent-ness doesn't gate either.
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS sent_by INTEGER REFERENCES staff(id);
+
+-- Marking an invoice paid requires a payment reference + date (enforced in
+-- the UI/model layer, not a NOT NULL here, since these stay NULL for every
+-- invoice that isn't yet paid).
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS payment_reference TEXT;
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS payment_date DATE;
+
 -- Migration for installs created before the admin-creates / principal-approves
 -- flow: map the old draft/issued statuses onto the new ones, and widen to
 -- allow 'rejected' (principal sends an invoice back to admin with a reason
@@ -122,6 +134,15 @@ ALTER TABLE job ALTER COLUMN client_id DROP NOT NULL;
 -- UI for those two transitions) — holds the reason for the CURRENT status,
 -- overwritten on the next status change. Not a full history log, by design.
 ALTER TABLE job ADD COLUMN IF NOT EXISTS status_reason TEXT;
+
+-- Rabbi invoices up front, before work starts: a job can't move new ->
+-- in_progress until it's invoiced and that invoice is approved (see the
+-- guard trigger below) — UNLESS a principal explicitly overrides that for
+-- this one job, recorded here for audit. The specialist still has to click
+-- Start work themselves; the override only lifts the gate.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_by INTEGER REFERENCES staff(id);
+ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_at TIMESTAMPTZ;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_job_client_id ON job(client_id);
 CREATE INDEX IF NOT EXISTS idx_job_owner_id ON job(owner_id);
@@ -218,6 +239,9 @@ CREATE INDEX IF NOT EXISTS idx_notification_dedup ON notification(staff_id, kind
 --      must be approved (or paid) — not just attached.
 --   2. A job with an unresolved blocked_by is forced to show 'blocked' and
 --      cannot advance to in_progress / done / closed.
+--   3. A job cannot move new -> in_progress ("Start work") until it has
+--      been invoiced and that invoice is approved (or paid) — unless a
+--      principal has recorded a start_override for this job.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION job_status_guard() RETURNS trigger AS $$
 DECLARE
@@ -233,6 +257,17 @@ BEGIN
                     NEW.job_id, NEW.blocked_by, NEW.status;
             END IF;
             NEW.status := 'blocked';
+        END IF;
+    END IF;
+
+    IF TG_OP = 'UPDATE' AND NEW.status = 'in_progress' AND OLD.status = 'new'
+       AND NEW.start_override_by IS NULL THEN
+        IF NEW.invoice_id IS NULL THEN
+            RAISE EXCEPTION 'Job % must be invoiced before work can start (or a principal override)', NEW.job_id;
+        END IF;
+        SELECT status INTO invoice_status_val FROM invoice WHERE id = NEW.invoice_id;
+        IF invoice_status_val IS NULL OR invoice_status_val NOT IN ('approved', 'paid') THEN
+            RAISE EXCEPTION 'Job % cannot start until its invoice is approved (or a principal override)', NEW.job_id;
         END IF;
     END IF;
 

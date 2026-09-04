@@ -73,6 +73,13 @@ def main() -> None:
         return
 
     pages = NAV[user["role"]]
+    page_names = [name for name, _ in pages]
+
+    # Restores the page/job/invoice the user was on before a hard reload —
+    # a no-op after the first run of this session_state, since navigation
+    # from here on keeps the URL in sync itself (see sync_nav_query_params
+    # below).
+    ui.restore_nav_from_query_params(page_names)
 
     ui.sidebar_wordmark()
     st.sidebar.markdown(f"**{user['name']}**")
@@ -80,7 +87,6 @@ def main() -> None:
     ui.notification_bell(user)
     st.sidebar.write("")
 
-    page_names = [name for name, _ in pages]
     choice = st.session_state.get("_current_page")
     if choice not in page_names:
         choice = page_names[0]
@@ -110,6 +116,8 @@ def main() -> None:
     if st.sidebar.button("Log out", use_container_width=True):
         logout()
         st.rerun()
+
+    ui.sync_nav_query_params()
 
     if st.session_state.get(ui.NAV_CREATE_INVOICE_KEY):
         invoice_create.render(user)

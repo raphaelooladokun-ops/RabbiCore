@@ -10,7 +10,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, STATUS_DONE, STATUS_LABELS_SHORT, humanize
+from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, STATUS_LABELS_SHORT, humanize
 
 _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.3]
 
@@ -27,7 +27,7 @@ def render(user: dict) -> None:
 
 def _subtitle(role: str) -> str:
     if role == ROLE_ADMIN:
-        return "Every unbilled job — create an invoice once it's done."
+        return "Every unbilled job — invoice it as soon as it's logged."
     return "Every invoice — open one pending your approval to review it as a document."
 
 
@@ -50,14 +50,11 @@ def _ready_to_invoice() -> None:
         cols[2].write(j["title"])
         cols[3].write(j["owner_name"] or "—")
         cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
-        if j["status"] == STATUS_DONE:
-            if cols[5].button("Create invoice", key=f"readyinv_{j['id']}"):
-                st.session_state["invoice_seed_job"] = j["id"]
-                st.session_state["invoice_seed_client"] = None
-                st.session_state["invoice_revise_id"] = None
-                ui.go_to_create_invoice()
-        else:
-            cols[5].caption("Not done yet")
+        if cols[5].button("Create invoice", key=f"readyinv_{j['id']}"):
+            st.session_state["invoice_seed_job"] = j["id"]
+            st.session_state["invoice_seed_client"] = None
+            st.session_state["invoice_revise_id"] = None
+            ui.go_to_create_invoice()
 
 
 def _invoices_list() -> None:
