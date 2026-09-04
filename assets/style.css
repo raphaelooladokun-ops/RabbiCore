@@ -37,20 +37,23 @@ h1, h2, h3, h4, h5, h6,
 }
 
 /* ---- Sidebar / nav ------------------------------------------------------
-   Belt-and-braces: [theme.sidebar] in config.toml is the primary fix (a
-   stable public API, not an internal testid that can drift across Streamlit
-   releases) — these rules are a second layer in case that config is ever
-   missing or overridden. Every rule here carries !important: a bare
-   background-color here previously lost a specificity/load-order fight
-   against Streamlit's own theme-driven sidebar background on the deployed
-   version, which is exactly what made the sidebar read as near-white text
-   on a near-white background. */
+   Deliberately NOT brand navy/teal here — after repeated contrast failures
+   the goal is maximum, foolproof legibility over brand-matching, and every
+   button below is styled as a fully self-contained, opaque "box" (its own
+   background + border) rather than relying on blending with the sidebar
+   background, so it stays readable even if some other rule doesn't match.
+
+   [theme.sidebar] in config.toml (a stable public Streamlit API, not an
+   internal testid) sets the base dark background; every rule here also
+   carries !important and duplicate selectors as a second layer, since a
+   bare/unqualified rule previously lost a specificity fight against
+   Streamlit's own theme CSS on the deployed version. */
 [data-testid="stSidebar"],
 section[data-testid="stSidebar"] {
-    background-color: var(--rc-navy) !important;
+    background-color: #1C1F26 !important;
 }
 [data-testid="stSidebar"] * {
-    color: #F2F5F8 !important;
+    color: #E8EAED !important;
 }
 [data-testid="stSidebar"] .rc-wordmark {
     font-family: 'Montserrat', sans-serif;
@@ -62,7 +65,7 @@ section[data-testid="stSidebar"] {
 }
 [data-testid="stSidebar"] .rc-tagline {
     font-size: 0.78rem;
-    color: #9FB3C8 !important;
+    color: #9AA1AC !important;
     margin-bottom: 1.25rem;
 }
 [data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
@@ -70,8 +73,66 @@ section[data-testid="stSidebar"] {
     border-radius: 8px;
 }
 [data-testid="stSidebar"] hr {
-    border-color: #1E3A5C;
+    border-color: #3A3F4B;
 }
+
+/* Every sidebar button (nav items, Log out, the notification bell) as its
+   own solid, high-contrast box — light box + dark text on the dark
+   sidebar. This is the readable BASE for every button regardless of its
+   "kind"/selected state, so even if the "selected" highlight below fails
+   to match on some future Streamlit release, the worst case is "readable
+   but not highlighted" rather than "invisible". Targets both the button
+   and everything inside it (icons/text wrappers), since the blanket
+   `[data-testid="stSidebar"] *` rule above would otherwise win on a plain
+   descendant and force near-white text onto a light button background. */
+[data-testid="stSidebar"] div[data-testid="stButton"] button,
+[data-testid="stSidebar"] div[data-testid="stButton"] button *,
+[data-testid="stSidebar"] button,
+[data-testid="stSidebar"] button * {
+    background-color: #2B2F38 !important;
+    color: #EDEEF0 !important;
+    border: 1.5px solid #4B505C !important;
+    font-weight: 600 !important;
+}
+[data-testid="stSidebar"] div[data-testid="stButton"] button:hover,
+[data-testid="stSidebar"] div[data-testid="stButton"] button:hover *,
+[data-testid="stSidebar"] button:hover,
+[data-testid="stSidebar"] button:hover * {
+    background-color: #4A5060 !important;
+    color: #FFFFFF !important;
+    border-color: #8B93A3 !important;
+}
+
+/* The SELECTED nav item (rendered with type="primary") — inverted to a
+   solid white pill so it visibly pops forward from every other (dark)
+   button; this is the one state that must be unmistakable at a glance.
+   Duplicate selectors cover both Streamlit's "kind" attribute and its
+   data-testid naming, whichever the running version actually emits. */
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"],
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"] *,
+[data-testid="stSidebar"] button[kind="primary"],
+[data-testid="stSidebar"] button[kind="primary"] *,
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] * {
+    background-color: #FFFFFF !important;
+    color: #14161B !important;
+    border: 1.5px solid #FFFFFF !important;
+    font-weight: 700 !important;
+}
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover,
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover *,
+[data-testid="stSidebar"] button[kind="primary"]:hover,
+[data-testid="stSidebar"] button[kind="primary"]:hover *,
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover,
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover * {
+    background-color: #F2F3F5 !important;
+    color: #14161B !important;
+}
+
+/* Log out has no distinct "kind" of its own (same default/secondary type
+   as an unselected nav item), so it gets the same readable box + hover
+   response above — already satisfies "clearly visible" and "responds to
+   hover" without needing a one-off rule. */
 
 /* ---- Buttons -------------------------------------------------------------*/
 .stButton > button, .stFormSubmitButton > button {
@@ -96,24 +157,10 @@ button[kind="secondary"],
     color: var(--rc-navy) !important;
     border: 1px solid var(--rc-border) !important;
 }
-/* The sidebar forces all its text/icons to a light colour for contrast
-   against the navy background (see [data-testid="stSidebar"] * above) —
-   that rule and the secondary-button rule above can end up tied on
-   specificity depending on the Streamlit version's exact DOM markup, which
-   is what made "Log out" render as invisible white-on-white. Scope an
-   explicit, higher-specificity override to the sidebar so a secondary
-   button there always stays readable regardless of that drift. */
-[data-testid="stSidebar"] button[kind="secondary"],
-[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
-    background-color: #FFFFFF !important;
-    color: var(--rc-navy) !important;
-    border: 1px solid var(--rc-border) !important;
-}
-[data-testid="stSidebar"] button[kind="secondary"]:hover,
-[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {
-    background-color: #EDEFF3 !important;
-    color: var(--rc-navy) !important;
-}
+/* Sidebar buttons (nav items, Log out, notification bell) are styled
+   entirely in the "Sidebar / nav" block above, deliberately independent of
+   brand colour and of this generic kind="secondary" rule — see that block
+   for why. Nothing sidebar-specific belongs here anymore. */
 
 /* ---- Cards / containers --------------------------------------------------*/
 .rc-card {

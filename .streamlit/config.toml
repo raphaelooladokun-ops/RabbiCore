@@ -9,13 +9,17 @@ font = "sans serif"
 # sidebar's low-contrast/invisible-button bug. Custom CSS selectors that
 # target internal testids (e.g. [data-testid="stSidebar"]) can silently stop
 # matching across Streamlit point releases; this [theme.sidebar] section is
-# a stable, versioned public API that always wins, so the navy background +
+# a stable, versioned public API that always wins, so the dark background +
 # light text no longer depend on our CSS overrides working at all. The CSS
 # in assets/style.css keeps its own sidebar rules too, as a second layer.
+#
+# Deliberately a neutral dark (not brand navy/teal): after this failed
+# repeatedly with brand colours, the goal here is maximum, foolproof
+# legibility over brand-matching.
 [theme.sidebar]
-backgroundColor = "#0A2540"
-secondaryBackgroundColor = "#123A63"
-textColor = "#F2F5F8"
+backgroundColor = "#1C1F26"
+secondaryBackgroundColor = "#2B2F38"
+textColor = "#E8EAED"
 
 [browser]
 gatherUsageStats = false
