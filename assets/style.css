@@ -76,63 +76,87 @@ section[data-testid="stSidebar"] {
     border-color: #3A3F4B;
 }
 
-/* Every sidebar button (nav items, Log out, the notification bell) as its
-   own solid, high-contrast box — light box + dark text on the dark
-   sidebar. This is the readable BASE for every button regardless of its
-   "kind"/selected state, so even if the "selected" highlight below fails
-   to match on some future Streamlit release, the worst case is "readable
-   but not highlighted" rather than "invisible". Targets both the button
-   and everything inside it (icons/text wrappers), since the blanket
-   `[data-testid="stSidebar"] *` rule above would otherwise win on a plain
-   descendant and force near-white text onto a light button background. */
+/* Every sidebar button (nav items, Log out, the notification bell) is ONE
+   flat surface — background/border are set on the <button> element only,
+   never on the label wrapper Streamlit renders inside it, which is exactly
+   what caused a visible "box inside a box": setting background+border on
+   `button *` too made that inner label wrapper its own smaller framed box.
+   Descendants only ever get `background: transparent; border: none` here,
+   so the button is the single visible surface and the label just sits on
+   it. Text colour still needs the `*` reach (see below) because the
+   blanket `[data-testid="stSidebar"] *` rule above would otherwise win on
+   that same descendant — colour alone draws no box, so this is safe. */
+[data-testid="stSidebar"] div[data-testid="stButton"] {
+    margin-bottom: 0.3rem !important;
+}
 [data-testid="stSidebar"] div[data-testid="stButton"] button,
-[data-testid="stSidebar"] div[data-testid="stButton"] button *,
-[data-testid="stSidebar"] button,
-[data-testid="stSidebar"] button * {
-    background-color: #2B2F38 !important;
-    color: #EDEEF0 !important;
-    border: 1.5px solid #4B505C !important;
+[data-testid="stSidebar"] button {
+    background-color: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
     font-weight: 600 !important;
+    justify-content: flex-start !important;
+    padding: 0.55rem 0.9rem !important;
+    width: 100% !important;
+}
+[data-testid="stSidebar"] div[data-testid="stButton"] button *,
+[data-testid="stSidebar"] button * {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    text-align: left !important;
+    color: #C7CBD1 !important;
+    font-weight: 600 !important;
+    /* The label sits inside two of Streamlit's own nested flex wrappers,
+       each independently centering its content — text-align alone can't
+       override that, since a flex child's position is decided by its
+       parent's justify-content, not its own text-align. */
+    justify-content: flex-start !important;
 }
 [data-testid="stSidebar"] div[data-testid="stButton"] button:hover,
+[data-testid="stSidebar"] button:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
 [data-testid="stSidebar"] div[data-testid="stButton"] button:hover *,
-[data-testid="stSidebar"] button:hover,
 [data-testid="stSidebar"] button:hover * {
-    background-color: #4A5060 !important;
     color: #FFFFFF !important;
-    border-color: #8B93A3 !important;
 }
 
-/* The SELECTED nav item (rendered with type="primary") — inverted to a
-   solid white pill so it visibly pops forward from every other (dark)
-   button; this is the one state that must be unmistakable at a glance.
-   Duplicate selectors cover both Streamlit's "kind" attribute and its
-   data-testid naming, whichever the running version actually emits. */
+/* The SELECTED nav item (rendered with type="primary") — solid white fill
+   so it visibly pops forward from every other (flat) item; this is the
+   one state that must be unmistakable at a glance. Duplicate selectors
+   cover both Streamlit's "kind" attribute and its data-testid naming,
+   whichever the running version actually emits. */
 [data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"],
-[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"] *,
 [data-testid="stSidebar"] button[kind="primary"],
-[data-testid="stSidebar"] button[kind="primary"] *,
-[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
-[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] * {
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
     background-color: #FFFFFF !important;
+}
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"] *,
+[data-testid="stSidebar"] button[kind="primary"] *,
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] * {
     color: #14161B !important;
-    border: 1.5px solid #FFFFFF !important;
     font-weight: 700 !important;
 }
 [data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover,
-[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover *,
 [data-testid="stSidebar"] button[kind="primary"]:hover,
-[data-testid="stSidebar"] button[kind="primary"]:hover *,
-[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover,
-[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover * {
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover {
     background-color: #F2F3F5 !important;
+}
+[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover *,
+[data-testid="stSidebar"] button[kind="primary"]:hover *,
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover * {
     color: #14161B !important;
 }
 
-/* Log out has no distinct "kind" of its own (same default/secondary type
-   as an unselected nav item), so it gets the same readable box + hover
-   response above — already satisfies "clearly visible" and "responds to
-   hover" without needing a one-off rule. */
+/* Log out and the notification bell have no distinct "kind" of their own
+   (same default/secondary type as an unselected nav item), so they get
+   the same flat row + hover response above — already satisfies "clearly
+   visible" and "responds to hover" without a one-off rule. The bell's
+   popover trigger renders as a <button> too, so it's covered by the same
+   selectors and gets the same single-surface treatment, no inner box
+   around the "N new" label. */
 
 /* ---- Buttons -------------------------------------------------------------*/
 .stButton > button, .stFormSubmitButton > button {
