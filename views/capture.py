@@ -44,7 +44,6 @@ def _job_form(user: dict) -> None:
 
     client_map = {c["name"]: c for c in clients}
     service_map = {s["name"]: s for s in services}
-    staff_map = {s["name"]: s for s in staff}
 
     col1, col2 = st.columns(2)
     with col1:
@@ -84,10 +83,26 @@ def _job_form(user: dict) -> None:
                 if val:
                     attributes[f["key"]] = val
 
+    # Soft routing nudge: once a service picks a category, staff assigned to
+    # that module (core.models.module_specialist) float to the top and the
+    # first one is pre-selected — anyone can still be chosen, this never
+    # filters the list, so it can't cost a specialist a fast capture.
+    ordered_staff = staff
+    default_owner_index = None
+    if service_name:
+        category_for_owner = PILLAR_TO_CATEGORY[service_map[service_name]["pillar"]]
+        assigned_ids = {a["staff_id"] for a in models.list_module_specialists(category_for_owner)}
+        if assigned_ids:
+            preferred = [s for s in staff if s["id"] in assigned_ids]
+            rest = [s for s in staff if s["id"] not in assigned_ids]
+            ordered_staff = preferred + rest
+            default_owner_index = 0
+    staff_map = {s["name"]: s for s in ordered_staff}
+
     col3, col4 = st.columns(2)
     with col3:
         owner_name = st.selectbox(
-            "Owner *", options=list(staff_map.keys()), index=None,
+            "Owner *", options=list(staff_map.keys()), index=default_owner_index,
             placeholder="Who owns this?", key="cap_owner",
         )
     with col4:

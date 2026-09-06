@@ -8,6 +8,7 @@ from datetime import date
 
 import streamlit as st
 
+from core import immigration
 from core import models
 from core import ui
 from core.constants import (
@@ -47,6 +48,9 @@ def render(user: dict, job_pk: int) -> None:
     st.write("")
     _blocking_alert(job)
     _info(job)
+    if job["category"] == "immigration":
+        st.divider()
+        _immigration_section(job, user)
     st.divider()
 
     editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
@@ -134,6 +138,99 @@ def _info(job: dict) -> None:
         st.caption(f"Internal notes: {job['internal_notes']}")
 
 
+def _immigration_section(job: dict, user: dict) -> None:
+    st.markdown("#### Immigration checklist")
+
+    docs = models.list_job_documents(job["id"])
+    received, required = models.job_document_readiness(job["id"])
+    if required == 0:
+        st.caption("No fixed checklist for this service — documents depend on what's requested at the time.")
+    else:
+        ready = received == required
+        badge_color = "green" if ready else ("amber" if received > 0 else "grey")
+        ready_suffix = " — ready to submit" if ready else ""
+        st.markdown(
+            f'<span class="rc-badge rc-badge-{badge_color}">'
+            f'Readiness: {received}/{required} documents{ready_suffix}</span>',
+            unsafe_allow_html=True,
+        )
+        st.write("")
+
+    editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
+    )
+
+    for d in docs:
+        cols = st.columns([0.4, 2.4, 1.3, 1.1])
+        checked = cols[0].checkbox(
+            "", value=d["received"], key=f"jdoc_{d['id']}", disabled=not editable, label_visibility="collapsed",
+        )
+        cols[1].write(d["document_name"])
+        if checked != d["received"]:
+            models.set_job_document_received(d["id"], checked)
+            st.rerun()
+
+        if d["has_expiry"]:
+            new_expiry = cols[2].date_input(
+                "Expiry", value=d["expiry_date"], key=f"jdocexp_{d['id']}", disabled=not editable,
+                label_visibility="collapsed",
+            )
+            if new_expiry != d["expiry_date"]:
+                models.set_job_document_expiry(d["id"], new_expiry)
+                immigration.sync_quota_cerpac_gate(actor_id=user["id"])
+                st.rerun()
+            if d["expiry_date"]:
+                cols[3].caption(models.EXPIRY_URGENCY_LABELS[models.expiry_urgency(d["expiry_date"])])
+        else:
+            cols[2].write("—")
+
+    if job["service_type"] == immigration.CERPAC_PRINCIPAL_SERVICE_CODE:
+        st.write("")
+        _quota_link_control(job, user, editable)
+
+
+def _quota_link_control(job: dict, user: dict, editable: bool) -> None:
+    with st.expander("Linked quota position", expanded=True):
+        candidates = immigration.list_quota_candidates(job["client_id"])
+        options = {"— no linked quota —": None}
+        options.update({f"{c['job_id']} — {c['title']}": c["id"] for c in candidates})
+
+        linked_pk = immigration.get_linked_quota_job_id(job)
+        current_label = "— no linked quota —"
+        for label, pk in options.items():
+            if pk == linked_pk:
+                current_label = label
+                break
+
+        if linked_pk:
+            _, days_remaining = immigration.quota_validity(linked_pk)
+            if days_remaining is None:
+                st.warning(
+                    "Linked quota has no recorded approval expiry yet — treated as not valid "
+                    "until one is entered on the quota job's own checklist."
+                )
+            elif days_remaining < immigration.QUOTA_MIN_VALIDITY_DAYS:
+                st.error(
+                    f"⛔ Quota validity: {days_remaining} day(s) remaining — under the 6-month "
+                    "minimum. This job is blocked until the quota is renewed."
+                )
+            else:
+                st.success(f"✅ Quota validity: {days_remaining} day(s) remaining.")
+
+        if not editable:
+            st.caption(current_label)
+            return
+
+        choice = st.selectbox(
+            "Linked quota job", options=list(options.keys()),
+            index=list(options.keys()).index(current_label), key=f"jd_{job['id']}_quotalink",
+        )
+        if st.button("Save quota link", key=f"jd_{job['id']}_savequota"):
+            immigration.set_quota_link(job["id"], options[choice], actor_id=user["id"])
+            st.toast("Saved.", icon="✅")
+            st.rerun()
+
+
 def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
     st.markdown("#### Status")
     actor_id = user["id"]
@@ -194,7 +291,18 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
     elif status == STATUS_BLOCKED:
         # Reaching here means blocked_now was False above — the dependency
         # (if any) is resolved, or this was a manual block with no
-        # dependency — either way, resuming is always available.
+        # dependency — either way, resuming is normally available. The one
+        # exception: the quota->CERPAC gate is date-driven, not
+        # blocker-status-driven, so is_actually_blocked() can read False
+        # here even while the gate is still active — never let a manual
+        # Resume bypass it. Only immigration.sync_quota_cerpac_gate() clears
+        # it, automatically, once the quota is actually renewed.
+        if job["category"] == "immigration" and immigration.is_quota_gate_active(job):
+            st.warning(
+                "Blocked — linked quota position has less than 6 months validity remaining. "
+                "This unblocks automatically once the quota is renewed."
+            )
+            return
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
             _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
 

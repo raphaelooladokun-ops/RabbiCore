@@ -124,10 +124,13 @@ def create_job(
             (row["id"], _json(attributes)),
         )
 
+    if service_type:
+        materialize_job_documents(row["id"], service_type, attributes)
+
     job = get_job(row["id"])
     owner = query_one("SELECT role FROM staff WHERE id = %s", (owner_id,))
     if owner and owner["role"] == ROLE_SPECIALIST:
-        _create_notification(
+        create_notification(
             owner_id, "assigned", "job", job["id"],
             f"New job {job['job_id']}: {job['client_name'] or '—'} — {job['service_name'] or job['title']}",
         )
@@ -194,7 +197,9 @@ def _resync_stale_blocked() -> None:
         FROM job j
         JOIN job b ON b.id = j.blocked_by
         LEFT JOIN client c ON c.id = j.client_id
+        LEFT JOIN job_extension je ON je.job_id = j.id
         WHERE j.status = 'blocked' AND b.status IN ('done', 'closed')
+          AND COALESCE((je.attributes->>'linked_quota_job_id')::int, -1) IS DISTINCT FROM j.blocked_by
         """
     )
     for row in stale:
@@ -203,7 +208,7 @@ def _resync_stale_blocked() -> None:
             (STATUS_IN_PROGRESS, row["id"]),
         )
         if row["owner_id"]:
-            _create_notification(
+            create_notification(
                 row["owner_id"], "unblocked", "job", row["id"],
                 f"Unblocked: {row['blocker_job_id']} is done — {row['client_name'] or '—'} — "
                 f"{row['title']} can proceed",
@@ -302,6 +307,17 @@ def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = Non
 def get_job_extension(job_pk: int) -> dict:
     row = query_one("SELECT attributes FROM job_extension WHERE job_id = %s", (job_pk,))
     return row["attributes"] if row else {}
+
+
+def set_job_extension(job_pk: int, attributes: dict) -> None:
+    """Replace a job's extension attributes wholesale — used both for
+    capture-time Type-field values and for module-specific bookkeeping a
+    module keeps in the same JSON (e.g. immigration's quota link)."""
+    execute(
+        "INSERT INTO job_extension (job_id, attributes) VALUES (%s, %s::jsonb) "
+        "ON CONFLICT (job_id) DO UPDATE SET attributes = EXCLUDED.attributes",
+        (job_pk, _json(attributes)),
+    )
 
 
 def list_blocked_dependents(job_pk: int) -> list:
@@ -482,7 +498,7 @@ def approve_invoice(invoice_id: int, approved_by: int) -> None:
     )
     inv = get_invoice(invoice_id)
     if inv["created_by"] and inv["created_by"] != approved_by:
-        _create_notification(
+        create_notification(
             inv["created_by"], "invoice_approved", "invoice", invoice_id,
             f"Invoice {inv['invoice_code']} approved — {inv['client_name']}",
         )
@@ -496,7 +512,7 @@ def reject_invoice(invoice_id: int, rejected_by: int, reason: str) -> None:
     )
     inv = get_invoice(invoice_id)
     if inv["created_by"] and inv["created_by"] != rejected_by:
-        _create_notification(
+        create_notification(
             inv["created_by"], "invoice_rejected", "invoice", invoice_id,
             f"Invoice {inv['invoice_code']} rejected — {reason}",
         )
@@ -624,7 +640,7 @@ def _notify_comment(job_pk: int, author_id: int) -> None:
         if s["id"] != author_id:
             recipients.add(s["id"])
     for staff_id in recipients:
-        _create_notification(staff_id, "comment", "job", job_pk, message)
+        create_notification(staff_id, "comment", "job", job_pk, message)
 
 
 def list_job_comments(job_id: int) -> list:
@@ -676,6 +692,149 @@ def is_stalled(job: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Document checklist — generic across every module. A service's checklist is
+# defined once in service_document_requirement; materialize_job_documents
+# copies it onto a specific job at creation time as job_document rows, which
+# are then ticked off as received. THE DATA BOUNDARY: job_document never
+# stores the file or a sensitive number — only that a document of this type
+# was received, and its expiry date if it has one.
+# ---------------------------------------------------------------------------
+def materialize_job_documents(job_pk: int, service_code: str, attributes: dict | None) -> None:
+    """Creates one job_document row per document this job's service — and,
+    if the job has one, its Type-field variant — requires. Matches on the
+    job's own attribute *values* rather than a hardcoded field key, since
+    which field counts as "the variant" differs by service; this is what
+    lets the same mechanism serve every future module unchanged."""
+    variants = list((attributes or {}).values()) or ["__none__"]
+    rows = query(
+        "SELECT DISTINCT document_type_code FROM service_document_requirement "
+        "WHERE service_code = %s AND (variant = '*' OR variant = ANY(%s))",
+        (service_code, variants),
+    )
+    for row in rows:
+        execute(
+            "INSERT INTO job_document (job_id, document_type_code) VALUES (%s, %s) "
+            "ON CONFLICT (job_id, document_type_code) DO NOTHING",
+            (job_pk, row["document_type_code"]),
+        )
+
+
+def list_job_documents(job_pk: int) -> list:
+    return query(
+        """
+        SELECT jd.*, dt.name AS document_name, dt.has_expiry
+        FROM job_document jd
+        JOIN document_type dt ON dt.code = jd.document_type_code
+        WHERE jd.job_id = %s
+        ORDER BY dt.name
+        """,
+        (job_pk,),
+    )
+
+
+def set_job_document_received(job_document_id: int, received: bool) -> None:
+    execute(
+        "UPDATE job_document SET received = %s, received_at = CASE WHEN %s THEN CURRENT_DATE ELSE NULL END "
+        "WHERE id = %s",
+        (received, received, job_document_id),
+    )
+
+
+def set_job_document_expiry(job_document_id: int, expiry_date: date | None) -> None:
+    execute("UPDATE job_document SET expiry_date = %s WHERE id = %s", (expiry_date, job_document_id))
+
+
+def job_document_readiness(job_pk: int) -> tuple:
+    """(received, required) — a service with no checklist at all (e.g. NIS
+    Inspection) reads (0, 0); render that as "no checklist", never as a
+    misleading 100%."""
+    row = query_one(
+        "SELECT COUNT(*) FILTER (WHERE received) AS received, COUNT(*) AS required "
+        "FROM job_document WHERE job_id = %s",
+        (job_pk,),
+    )
+    return (row["received"], row["required"]) if row else (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Expiry tracking — generic across every module: any received job_document
+# with an expiry date, on a job that isn't finished, bucketed by urgency so
+# nothing lapses silently.
+# ---------------------------------------------------------------------------
+EXPIRY_EXPIRED = "expired"
+EXPIRY_DUE = "due"
+EXPIRY_APPROACHING = "approaching"
+
+EXPIRY_URGENCY_LABELS = {
+    EXPIRY_EXPIRED: "Expired",
+    EXPIRY_DUE: "Due soon",
+    EXPIRY_APPROACHING: "Approaching",
+}
+
+
+def expiry_urgency(expiry_date: date) -> str:
+    days = (expiry_date - date.today()).days
+    if days < 0:
+        return EXPIRY_EXPIRED
+    if days <= 30:
+        return EXPIRY_DUE
+    return EXPIRY_APPROACHING
+
+
+def list_upcoming_expiries(category: str | None = None, within_days: int = 90) -> list:
+    """Every received job_document with an expiry date within `within_days`
+    (already-expired included, no lower bound) on a job that's still live —
+    the cross-job dashboard so nothing lapses silently."""
+    sql = f"""
+        SELECT jd.id AS job_document_id, jd.expiry_date, dt.name AS document_name,
+               j.id AS job_pk, j.job_id AS job_code, j.title, j.category, j.owner_id,
+               c.name AS client_name, s.name AS owner_name
+        FROM job_document jd
+        JOIN document_type dt ON dt.code = jd.document_type_code
+        JOIN job j ON j.id = jd.job_id
+        LEFT JOIN client c ON c.id = j.client_id
+        LEFT JOIN staff s ON s.id = j.owner_id
+        WHERE jd.received = TRUE AND jd.expiry_date IS NOT NULL
+          AND j.status NOT IN ('{STATUS_DONE}', '{STATUS_CLOSED}', '{STATUS_DISMISSED}')
+          AND jd.expiry_date <= CURRENT_DATE + (%s * INTERVAL '1 day')
+    """
+    params: list = [within_days]
+    if category:
+        sql += " AND j.category = %s"
+        params.append(category)
+    sql += " ORDER BY jd.expiry_date"
+    return query(sql, tuple(params))
+
+
+# ---------------------------------------------------------------------------
+# Module specialist — which staff handle a given category's jobs, so Capture
+# can route/pre-select the right owner. A soft nudge, not a hard filter.
+# ---------------------------------------------------------------------------
+def list_module_specialists(category: str) -> list:
+    return query(
+        """
+        SELECT ms.*, s.name AS staff_name, s.email AS staff_email
+        FROM module_specialist ms
+        JOIN staff s ON s.id = ms.staff_id
+        WHERE ms.category = %s
+        ORDER BY s.name
+        """,
+        (category,),
+    )
+
+
+def assign_module_specialist(category: str, staff_id: int) -> None:
+    execute(
+        "INSERT INTO module_specialist (category, staff_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (category, staff_id),
+    )
+
+
+def unassign_module_specialist(category: str, staff_id: int) -> None:
+    execute("DELETE FROM module_specialist WHERE category = %s AND staff_id = %s", (category, staff_id))
+
+
+# ---------------------------------------------------------------------------
 # Firm-wide summary (principal overview)
 # ---------------------------------------------------------------------------
 def firm_summary() -> dict:
@@ -708,7 +867,7 @@ def firm_summary() -> dict:
 # read in this app — see sync_sla_notifications() for the one case (a time
 # condition, not a write) that needs its own dedupe.
 # ---------------------------------------------------------------------------
-def _create_notification(staff_id: int, kind: str, link_type: str, link_id: int, message: str) -> None:
+def create_notification(staff_id: int, kind: str, link_type: str, link_id: int, message: str) -> None:
     execute(
         "INSERT INTO notification (staff_id, kind, link_type, link_id, message) VALUES (%s, %s, %s, %s, %s)",
         (staff_id, kind, link_type, link_id, message),
@@ -718,7 +877,7 @@ def _create_notification(staff_id: int, kind: str, link_type: str, link_id: int,
 def _notify_principals(kind: str, link_type: str, link_id: int, message: str, exclude_staff_id: int | None = None) -> None:
     for p in list_staff(role="principal"):
         if p["id"] != exclude_staff_id:
-            _create_notification(p["id"], kind, link_type, link_id, message)
+            create_notification(p["id"], kind, link_type, link_id, message)
 
 
 def _notify_status_change(job_pk: int, new_status: str, reason: str | None, actor_id: int | None) -> None:
@@ -733,7 +892,7 @@ def _notify_status_change(job_pk: int, new_status: str, reason: str | None, acto
     reason_part = f" — {reason}" if reason else ""
     message = f"{job['job_id']} marked {label}: {job['client_name'] or '—'} — {job['title']}{reason_part}"
     if job["owner_id"] and job["owner_id"] != actor_id:
-        _create_notification(job["owner_id"], f"status_{new_status}", "job", job_pk, message)
+        create_notification(job["owner_id"], f"status_{new_status}", "job", job_pk, message)
     _notify_principals(f"status_{new_status}", "job", job_pk, message, exclude_staff_id=actor_id)
 
 
@@ -749,7 +908,7 @@ def _unblock_dependents(blocker_pk: int, actor_id: int | None) -> None:
     for dep in dependents:
         execute("UPDATE job SET status = %s, status_reason = NULL WHERE id = %s", (STATUS_IN_PROGRESS, dep["id"]))
         if dep["owner_id"]:
-            _create_notification(
+            create_notification(
                 dep["owner_id"], "unblocked", "job", dep["id"],
                 f"Unblocked: {blocker['job_id']} is done — {dep['client_name'] or '—'} — {dep['title']} can proceed",
             )
@@ -765,7 +924,7 @@ def _notify_blocker_owner(dependent_pk: int, blocker_pk: int, actor_id: int | No
         (dependent_pk,),
     )
     if blocker and blocker["owner_id"] and blocker["owner_id"] != actor_id:
-        _create_notification(
+        create_notification(
             blocker["owner_id"], "blocking", "job", blocker_pk,
             f"Your job {blocker['job_id']} is blocking {dependent['job_id']} — "
             f"{dependent['client_name'] or '—'} — {dependent['title']}",

@@ -304,3 +304,68 @@ DROP TRIGGER IF EXISTS trg_job_status_guard ON job;
 CREATE TRIGGER trg_job_status_guard
     BEFORE INSERT OR UPDATE ON job
     FOR EACH ROW EXECUTE FUNCTION job_status_guard();
+
+-- ---------------------------------------------------------------------------
+-- DOCUMENT TYPE — the master catalogue of document/permit types a job's
+-- checklist can reference. Generic across every module: immigration seeds
+-- the first batch of rows here, CIT/State add their own the same way.
+-- Never holds the document itself or a sensitive number — just what kind of
+-- document it is, and whether that kind expires.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document_type (
+    id              SERIAL PRIMARY KEY,
+    code            TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL,
+    has_expiry      BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- ---------------------------------------------------------------------------
+-- SERVICE DOCUMENT REQUIREMENT — which document types a service's checklist
+-- requires, optionally narrowed to one Type-field variant of that service
+-- (e.g. E-CERPAC Renewal adds Old CERPAC Card that Out-of-Country doesn't).
+-- variant = '*' means the requirement applies to every variant of the
+-- service (or the service has no Type field at all) — a real sentinel
+-- rather than NULL, so the (service_code, variant, document_type_code)
+-- unique constraint actually prevents duplicate rows across bootstrap runs
+-- (Postgres never treats two NULLs as conflicting).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS service_document_requirement (
+    id                  SERIAL PRIMARY KEY,
+    service_code        TEXT NOT NULL REFERENCES service_catalogue(code),
+    variant             TEXT NOT NULL DEFAULT '*',
+    document_type_code  TEXT NOT NULL REFERENCES document_type(code),
+    UNIQUE (service_code, variant, document_type_code)
+);
+
+-- ---------------------------------------------------------------------------
+-- JOB DOCUMENT — one row per required (or added) document on a specific job,
+-- materialized from service_document_requirement when the job is created,
+-- then ticked off as received. THE DATA BOUNDARY: this table never stores
+-- the document file or a sensitive identifier (passport number, DOB, CERPAC
+-- number) — only that a document of this type was received, and its expiry
+-- date if it has one. The real file/number lives externally, referenced
+-- only by the fact that a checklist item is ticked.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS job_document (
+    id                  SERIAL PRIMARY KEY,
+    job_id              INTEGER NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+    document_type_code  TEXT NOT NULL REFERENCES document_type(code),
+    received            BOOLEAN NOT NULL DEFAULT FALSE,
+    received_at         DATE,
+    expiry_date         DATE,
+    UNIQUE (job_id, document_type_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_document_job_id ON job_document(job_id);
+
+-- ---------------------------------------------------------------------------
+-- MODULE SPECIALIST — which staff handle a given category's jobs, so Capture
+-- can route/pre-select the right owner. A soft nudge, not a hard filter —
+-- any active staff can still be picked as owner.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS module_specialist (
+    id              SERIAL PRIMARY KEY,
+    category        TEXT NOT NULL CHECK (category IN ('cac', 'immigration', 'cit', 'state')),
+    staff_id        INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    UNIQUE (category, staff_id)
+);

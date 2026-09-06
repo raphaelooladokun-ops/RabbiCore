@@ -10,6 +10,7 @@ from core import ui
 from core.auth import current_user, logout, restore_session_from_query_params
 from core.bootstrap import bootstrap_once
 from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST, ROLE_SUPER_ADMIN
+from core.immigration import sync_quota_cerpac_gate
 from views import (
     billing,
     capture,
@@ -17,6 +18,7 @@ from views import (
     home_client,
     home_principal,
     home_specialist,
+    immigration,
     invoice_create,
     invoice_detail,
     job_detail,
@@ -42,17 +44,32 @@ def _sla_sweep_ticket() -> bool:
 
 _sla_sweep_ticket()
 
+
+@st.cache_resource(ttl=300, show_spinner=False)
+def _quota_gate_sweep_ticket() -> bool:
+    """Same pattern as the SLA sweep: re-checks every CERPAC job linked to a
+    quota position at most once every 5 minutes, so a validity window
+    crossing the 6-month line purely with time passing still gets caught
+    even if nobody touches either job's record."""
+    sync_quota_cerpac_gate()
+    return True
+
+
+_quota_gate_sweep_ticket()
+
 NAV = {
     ROLE_PRINCIPAL: [
         ("Overview", home_principal.render),
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
+        ("Immigration", immigration.render),
         ("Billing", billing.render),
     ],
     ROLE_ADMIN: [
         ("Home", home_admin.render),
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
+        ("Immigration", immigration.render),
         ("Billing", billing.render),
     ],
     ROLE_SPECIALIST: [
@@ -68,6 +85,7 @@ NAV = {
         ("Home", home_admin.render),
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
+        ("Immigration", immigration.render),
         ("Billing", billing.render),
         ("My Queue", home_specialist.render),
         ("My Jobs", home_client.render),

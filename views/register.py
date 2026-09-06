@@ -38,14 +38,16 @@ def render(
     title: str = "Register",
     subtitle: str = "Every job, filterable — the single source of truth.",
     show_header: bool = True,
+    category: str | None = None,
 ) -> None:
     if show_header:
         ui.page_header(title, subtitle)
     ui.risk_legend()
-    key_prefix = "own" if only_own else "reg"
+    key_prefix = "own" if only_own else (f"cat_{category}" if category else "reg")
 
     jobs = models.list_jobs(
         owner_id=user["id"] if only_own else None,
+        category=category,
         exclude_dismissed=False,
     )
 

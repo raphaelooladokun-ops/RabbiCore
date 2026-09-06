@@ -21,6 +21,7 @@ from core.seed_data import (
     PILLAR_TO_CATEGORY,
     SERVICE_CATALOGUE,
 )
+from core.seed_documents import DOCUMENT_TYPES, SERVICE_DOCUMENT_REQUIREMENTS
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
@@ -44,6 +45,30 @@ def seed_catalogue() -> None:
                 sort_order = EXCLUDED.sort_order
             """,
             (svc["code"], svc["pillar"], svc["name"], _to_json(svc["fields"]), i),
+        )
+
+
+def seed_document_catalogue() -> None:
+    """Idempotent: the document-type catalogue + which documents each
+    service's checklist requires. Immigration is the first module to
+    populate this; future modules add their own rows here the same way."""
+    for dt in DOCUMENT_TYPES:
+        execute(
+            """
+            INSERT INTO document_type (code, name, has_expiry)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, has_expiry = EXCLUDED.has_expiry
+            """,
+            (dt["code"], dt["name"], dt["has_expiry"]),
+        )
+    for req in SERVICE_DOCUMENT_REQUIREMENTS:
+        execute(
+            """
+            INSERT INTO service_document_requirement (service_code, variant, document_type_code)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (service_code, variant, document_type_code) DO NOTHING
+            """,
+            (req["service_code"], req["variant"], req["document_type_code"]),
         )
 
 
@@ -151,5 +176,6 @@ def seed_demo_data() -> None:
 def bootstrap_once() -> bool:
     ensure_schema()
     seed_catalogue()
+    seed_document_catalogue()
     seed_demo_data()
     return True

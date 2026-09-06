@@ -1,8 +1,8 @@
 # Rabbi Core
 
-The foundation of the Rabbi Consult suite, plus its first module: **Front
-Office** (intake, register, billing). Later modules — Immigration, CIT,
-State Matters — build on this same core.
+The foundation of the Rabbi Consult suite — **Front Office** (intake,
+register, billing) — plus its first specialist module, **Immigration**.
+CIT and State Matters build on the same core the same way.
 
 **Stack:** Streamlit (thin presentation layer) + Neon PostgreSQL (all schema
 and business rules) + GitHub (public repo, free-tier deploy).
@@ -20,19 +20,31 @@ from ever being committed.
 ```
 core/
   schema.sql       # the shared spine: client, staff, service_catalogue,
-                    invoice, job, job_extension + the status-guard trigger
+                    invoice, job, job_extension + the status-guard trigger,
+                    plus the generic document_type / service_document_
+                    requirement / job_document / module_specialist tables
   seed_data.py      # the locked 43-service catalogue + demo logins/jobs
+  seed_documents.py  # document-type catalogue + per-service checklist
+                       requirements (Immigration's 10 services)
   bootstrap.py       # applies schema.sql and seeds data (idempotent, runs
                        once per app process)
   db.py               # Neon connection pool (via st.secrets, never hardcoded)
   auth.py              # real per-user login (bcrypt password + session)
-  models.py            # all queries and business rules — views never write SQL
+  models.py            # all queries and GENERIC business rules — the
+                         document checklist, expiry tracking and module-
+                         specialist mechanisms every module shares; views
+                         never write SQL
+  immigration.py        # the ONE immigration-specific rule: the quota →
+                          CERPAC validity gate. Future CIT/State modules add
+                          their own cit.py / state.py alongside this, never
+                          touching the generic core/models.py mechanisms
   constants.py          # roles, statuses, colours, human-readable labels
   ui.py                  # theme injection, badges, page headers
   pdf.py                  # renders an approved invoice as a downloadable PDF
 views/
   login.py, capture.py, register.py, billing.py, job_detail.py,
-  home_principal.py, home_admin.py, home_specialist.py, home_client.py
+  immigration.py (module dashboard), home_principal.py, home_admin.py,
+  home_specialist.py, home_client.py
 assets/style.css      # navy/teal brand theme, Montserrat/Lato, status colours
 app.py                  # entrypoint: login gate + role-based navigation
 scripts/init_db.py       # manual/CI schema+seed runner (optional — the app
@@ -141,6 +153,78 @@ Change or remove these before using the app with real client data.
   in `compute_risk()`). When the blocking job is marked done or closed, every
   job waiting on it automatically moves back to `in_progress` and its owner
   is notified it can proceed — no manual re-save needed.
+
+## The Immigration module — the first specialist module
+
+This extends the shared job spine — it does not replace it. An immigration
+job is a `job` with `category = 'immigration'`, plus specialist detail
+attached via extension mechanisms; capture, register, invoicing,
+notifications, comments and expenses all keep working unchanged. The
+pattern here is deliberately generic so CIT and State can reuse it without
+rewriting it:
+
+- **Document checklist (generic, reusable).** `document_type` is the master
+  catalogue of document/permit kinds; `service_document_requirement` says
+  which ones each service's checklist needs (optionally narrowed to one
+  Type-field variant, e.g. E-CERPAC Renewal adds "Old CERPAC Card" that
+  Out-of-Country doesn't). `job_document` is materialized onto a job at
+  creation time from its service + variant, then ticked off as received —
+  no per-service Python code, just data. **Readiness** (`received/required`)
+  shows as a badge on the job page; a service with no fixed checklist (NIS
+  Inspection) reads `0/0` and says so, never a misleading 100%.
+- **Expiry tracking (generic, reusable).** Any received `job_document` with
+  an expiry date is picked up by `models.list_upcoming_expiries()`, bucketed
+  `expired` (< today) / `due soon` (≤ 30 days) / `approaching` (≤ 90 days) —
+  the Immigration dashboard's "Upcoming expiries" panel is this query
+  filtered to `category = 'immigration'`; CIT/State get the same panel for
+  free by filtering the same function to their own category.
+- **The quota → CERPAC gate (the one immigration-specific rule).** A CERPAC
+  (Principal) job can be linked to the client's Quota job; if that quota's
+  current approval (its own `QUOTA-APPROVAL` checklist item) has under 6
+  months' validity remaining, the CERPAC job is forced `blocked` and
+  `blocked_by` points at the quota job — reusing the existing dependency
+  column and "Depends on" UI. This is date-driven, not status-driven, so it
+  deliberately does **not** reuse the generic `job_status_guard` trigger's
+  blocker-done/closed resolution (a quota job is usually already `done` —
+  that's not what makes it valid). `core/immigration.py` owns the whole
+  lifecycle: it sets/clears `blocked_by` + `status` directly, and
+  `models._resync_stale_blocked()` is taught to leave alone any job whose
+  extension marks its `blocked_by` as this kind of link, so the generic
+  self-heal and the module's own gate never fight over the same job. The
+  gate re-checks immediately whenever the quota's checklist changes, and
+  on a 5-minute sweep (mirroring the SLA sweep) as a safety net for pure
+  time-based drift; when it resolves, the CERPAC job auto-unblocks and its
+  owner is notified (reusing the existing notification mechanism), and the
+  job detail page removes the manual "Resume" button while the gate is
+  active so it can't be bypassed. This is the module's whole reason to
+  exist — get an expatriate's CERPAC renewed before the underlying quota
+  lapses.
+- **Specialist routing (`module_specialist`).** A category → staff mapping
+  managed from the Immigration dashboard. Purely a soft nudge: in Capture,
+  once an immigration service is picked, assigned staff float to the top of
+  the Owner dropdown and the first one is pre-selected — nobody is filtered
+  out, so it can't cost a specialist a fast capture (front-office brief:
+  "keep it fast").
+- **The data boundary, unchanged.** `job_document` stores only a document
+  type code, a received flag/date, and an expiry date — never the file, a
+  passport number, a date of birth, or the CERPAC number itself. The actual
+  sensitive record lives externally; the app only tracks that it was
+  received and when it expires.
+
+**Judgement calls worth flagging:**
+- The 6-month minimum is approximated as 182 days (`QUOTA_MIN_VALIDITY_DAYS`
+  in `core/immigration.py`) rather than calendar months, to avoid adding a
+  date-math dependency for one comparison.
+- `QUOTA-APPROVAL` (the quota's current approval document) is on every
+  Quota variant's checklist (Grant/Addition/Renewal), not just Renewal's —
+  it doubles as the input for a renewal *and* the record of the newly
+  granted approval's validity for Grant/Addition, which is what the gate
+  reads for any subsequently linked CERPAC job.
+- The quota link is scoped to E-CERPAC (Principal) only, per the brief —
+  the dependant e-CERPACs (spouse/child) don't carry their own quota
+  position.
+- Expiry urgency thresholds (due ≤ 30 days, approaching ≤ 90 days) aren't
+  specified anywhere in the source material; chosen as reasonable defaults.
 
 ## Interconnection audit (batch 2)
 
@@ -361,7 +445,11 @@ once the CAC module is planned.
 
 ## Not built yet (by design)
 
-Specialist modules (Immigration, CIT, State, CAC) and any sensitive personal
-data (passport numbers, uploaded documents) — per the brief, those come
-later, on this same core, and the modules that need sensitive data move to a
-private host at that point.
+CIT, State Matters and CAC specialist modules — built on the same generic
+document-checklist/expiry/module-specialist mechanisms Immigration just
+established, plus whatever module-specific rule each one needs (its own
+`core/cit.py` / `core/state.py`, following `core/immigration.py`'s pattern).
+Any sensitive personal data (passport numbers, CERPAC numbers, uploaded
+documents) stays out of this app by design — see The data boundary above —
+and any module that needs to hold that data directly moves to a private
+host at that point.
