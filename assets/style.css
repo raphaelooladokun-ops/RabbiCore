@@ -68,6 +68,20 @@ section[data-testid="stSidebar"] {
     color: #9AA1AC !important;
     margin-bottom: 1.25rem;
 }
+/* Deliberately purple — not used anywhere else in the palette (risk colours
+   are red/amber/green/grey, brand is navy/teal) — so this mode indicator is
+   never mistaken for a status colour or an ordinary role caption. */
+[data-testid="stSidebar"] .rc-superadmin-badge {
+    display: inline-block;
+    background-color: #7C3AED;
+    color: #FFFFFF !important;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    margin: 0.35rem 0 0.85rem 0;
+}
 [data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
     padding: 0.35rem 0.5rem;
     border-radius: 8px;

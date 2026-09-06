@@ -9,7 +9,7 @@ from core import models
 from core import ui
 from core.auth import current_user, logout, restore_session_from_query_params
 from core.bootstrap import bootstrap_once
-from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST
+from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST, ROLE_SUPER_ADMIN
 from views import (
     billing,
     capture,
@@ -61,6 +61,17 @@ NAV = {
     ROLE_CLIENT: [
         ("My Jobs", home_client.render),
     ],
+    # Full access — the union of every other role's environment, so the
+    # firm owner can see and act on all of it from one account.
+    ROLE_SUPER_ADMIN: [
+        ("Overview", home_principal.render),
+        ("Home", home_admin.render),
+        ("Capture", capture.render),
+        ("Register", lambda u: register.render(u)),
+        ("Billing", billing.render),
+        ("My Queue", home_specialist.render),
+        ("My Jobs", home_client.render),
+    ],
 }
 
 
@@ -84,6 +95,8 @@ def main() -> None:
     ui.sidebar_wordmark()
     st.sidebar.markdown(f"**{user['name']}**")
     st.sidebar.caption(ROLE_LABELS[user["role"]])
+    if user["role"] == ROLE_SUPER_ADMIN:
+        ui.super_admin_badge()
     ui.notification_bell(user)
     st.sidebar.write("")
 

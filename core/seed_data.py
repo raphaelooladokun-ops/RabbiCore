@@ -130,6 +130,7 @@ DEMO_CLIENTS = [
 # staff seeded with placeholder client_name for role='client' (resolved to an
 # id at seed time against DEMO_CLIENTS above)
 DEMO_STAFF = [
+    {"name": "Firm Owner", "email": "owner@rabbiconsult.test", "role": "super_admin", "client_name": None},
     {"name": "EC (Principal)", "email": "ec@rabbiconsult.test", "role": "principal", "client_name": None},
     {"name": "Ops Coordinator", "email": "admin@rabbiconsult.test", "role": "admin", "client_name": None},
     {"name": "Chuka Nwosu", "email": "specialist@rabbiconsult.test", "role": "specialist", "client_name": None},

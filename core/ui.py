@@ -247,3 +247,13 @@ def sidebar_wordmark() -> None:
         '<div class="rc-tagline">Front Office</div>',
         unsafe_allow_html=True,
     )
+
+
+def super_admin_badge() -> None:
+    """A deliberately loud, unmissable marker that this session has full
+    access across every role's environment — never to be confused with an
+    ordinary role caption."""
+    st.sidebar.markdown(
+        '<div class="rc-superadmin-badge">⚡ Full access — all environments</div>',
+        unsafe_allow_html=True,
+    )

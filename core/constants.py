@@ -10,12 +10,18 @@ ROLE_PRINCIPAL = "principal"
 ROLE_ADMIN = "admin"
 ROLE_SPECIALIST = "specialist"
 ROLE_CLIENT = "client"
+# Full access across every environment (principal + admin + specialist) —
+# for the firm owner. Every existing role-gate in the app is an *addition*
+# of this role alongside its existing allowed roles, never a replacement,
+# so principal/admin/specialist/client keep exactly the access they had.
+ROLE_SUPER_ADMIN = "super_admin"
 
 ROLE_LABELS = {
     ROLE_PRINCIPAL: "Principal",
     ROLE_ADMIN: "Admin",
     ROLE_SPECIALIST: "Specialist",
     ROLE_CLIENT: "Client",
+    ROLE_SUPER_ADMIN: "Super Admin",
 }
 
 # ---------------------------------------------------------------------------

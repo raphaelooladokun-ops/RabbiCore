@@ -26,11 +26,17 @@ CREATE TABLE IF NOT EXISTS staff (
     name            TEXT NOT NULL,
     email           TEXT NOT NULL UNIQUE,
     password_hash   TEXT NOT NULL,
-    role            TEXT NOT NULL CHECK (role IN ('principal', 'admin', 'specialist', 'client')),
+    role            TEXT NOT NULL CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin')),
     client_id       INTEGER REFERENCES client(id) ON DELETE SET NULL,  -- set when role = 'client'
     active          BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for installs created before 'super_admin' existed — widen the
+-- check constraint without touching any existing row. No-op once migrated.
+ALTER TABLE staff DROP CONSTRAINT IF EXISTS staff_role_check;
+ALTER TABLE staff ADD CONSTRAINT staff_role_check
+    CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin'));
 
 -- ---------------------------------------------------------------------------
 -- SERVICE CATALOGUE — the locked 43-service catalogue (CAC / Immigration /

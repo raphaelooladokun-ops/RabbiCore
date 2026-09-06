@@ -16,6 +16,7 @@ from core.constants import (
     ROLE_ADMIN,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
+    ROLE_SUPER_ADMIN,
     SOURCE_LABELS,
     STATUS_BLOCKED,
     STATUS_CLOSED,
@@ -48,7 +49,7 @@ def render(user: dict, job_pk: int) -> None:
     _info(job)
     st.divider()
 
-    editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) or (
+    editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
 
@@ -65,13 +66,13 @@ def render(user: dict, job_pk: int) -> None:
     # done — so this section (and Create invoice within it) is available at
     # any non-dismissed status for admin/principal, not gated to done/closed.
     show_invoice_section = (
-        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] != STATUS_DISMISSED
+        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED
     ) or (user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and job["invoice_code"])
     if show_invoice_section:
         _invoice_section(job, user)
         st.divider()
 
-    can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) or (
+    can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
     if can_see_expenses:
@@ -154,7 +155,7 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
                 _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
         else:
             st.info(f"Can't start yet — {block_reason}")
-            if role == ROLE_PRINCIPAL:
+            if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
                 with st.form(key=f"{key_prefix}_override_form"):
                     st.write("Allow this job to start without an approved invoice")
                     reason = st.text_input("Reason for the override *", key=f"{key_prefix}_override_reason")
@@ -167,7 +168,7 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
                             st.rerun()
 
     elif status == STATUS_IN_PROGRESS:
-        if role in (ROLE_SPECIALIST, ROLE_PRINCIPAL):
+        if role in (ROLE_SPECIALIST, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
             c1, c2 = st.columns(2)
             with c1:
                 with st.form(key=f"{key_prefix}_done_form"):
@@ -254,7 +255,7 @@ def _duplicate_control(job: dict, key_prefix: str, user: dict) -> None:
     """Admin-only way to remove a genuine duplicate without a hard delete —
     dismisses it with a reason, same as any other dismissal, so the record
     and its audit trail stay intact."""
-    if user["role"] != ROLE_ADMIN:
+    if user["role"] not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
         return
     with st.expander("Mark as duplicate"):
         st.caption(
@@ -289,14 +290,15 @@ def _invoice_section(job: dict, user: dict) -> None:
             ui.go_to_invoice(job["invoice_id"])
     else:
         st.caption("Not yet invoiced.")
-        if user["role"] == ROLE_ADMIN and job["status"] != STATUS_DISMISSED:
+        if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED:
             if st.button("Create invoice", key=f"jd_createinv_{job['id']}", type="primary"):
                 st.session_state["invoice_seed_job"] = job["id"]
                 st.session_state["invoice_seed_client"] = None
                 st.session_state["invoice_revise_id"] = None
                 ui.go_to_create_invoice()
 
-    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL) and job["status"] == STATUS_DONE and job["invoice_id"]:
+    invoice_closable_roles = (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+    if user["role"] in invoice_closable_roles and job["status"] == STATUS_DONE and job["invoice_id"]:
         if job["invoice_status"] not in ("approved", "paid"):
             st.info(f"Waiting on approval for invoice **{job['invoice_code']}** before this job can close.")
         else:
@@ -332,7 +334,7 @@ def _expenses(job: dict, user: dict) -> None:
     else:
         st.caption("No expenses logged yet.")
 
-    if user["role"] == ROLE_ADMIN:
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
         with st.form(key=f"expense_form_{job['id']}", clear_on_submit=True):
             st.write("Add expense")
             c1, c2, c3 = st.columns([2, 1, 1])

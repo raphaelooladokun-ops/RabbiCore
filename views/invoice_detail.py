@@ -13,7 +13,14 @@ import streamlit as st
 from core import models
 from core import pdf as pdf_module
 from core import ui
-from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SPECIALIST, humanize
+from core.constants import (
+    INVOICE_STATUS_LABELS,
+    ROLE_ADMIN,
+    ROLE_PRINCIPAL,
+    ROLE_SPECIALIST,
+    ROLE_SUPER_ADMIN,
+    humanize,
+)
 
 
 def render(user: dict, invoice_pk: int) -> None:
@@ -24,7 +31,9 @@ def render(user: dict, invoice_pk: int) -> None:
         st.error("Invoice not found.")
         return
 
-    if user["role"] == ROLE_SPECIALIST:
+    if user["role"] == ROLE_SUPER_ADMIN:
+        pass  # full access — every invoice, every action below
+    elif user["role"] == ROLE_SPECIALIST:
         # View-only: only if they own at least one job on this invoice.
         invoice_jobs = models.list_jobs_for_invoice(invoice["id"])
         if not any(j["owner_id"] == user["id"] for j in invoice_jobs):
@@ -42,7 +51,9 @@ def render(user: dict, invoice_pk: int) -> None:
     if invoice["status"] == "rejected":
         st.warning(f"**Rejected by {invoice['rejected_by_name'] or '—'}:** {invoice['rejection_reason']}")
 
-    editable_by_principal = user["role"] == ROLE_PRINCIPAL and invoice["status"] == "pending_approval"
+    editable_by_principal = (
+        user["role"] in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and invoice["status"] == "pending_approval"
+    )
 
     if editable_by_principal:
         _principal_review(user, invoice, lines)
@@ -53,13 +64,13 @@ def render(user: dict, invoice_pk: int) -> None:
 
 
 def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> None:
-    if user["role"] == ROLE_ADMIN and invoice["status"] == "rejected":
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] == "rejected":
         st.write("")
         if st.button("Revise & resubmit", type="primary", key="inv_revise"):
             st.session_state["invoice_revise_id"] = invoice["id"]
             ui.go_to_create_invoice()
 
-    if invoice["status"] in ("approved", "paid") and user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL):
+    if invoice["status"] in ("approved", "paid") and user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
         st.write("")
         pdf_bytes = pdf_module.build_invoice_pdf(invoice, lines, total)
         st.download_button(
@@ -67,7 +78,7 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
             mime="application/pdf", key="inv_pdf",
         )
 
-    if user["role"] == ROLE_ADMIN and invoice["status"] in ("approved", "paid"):
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] in ("approved", "paid"):
         st.write("")
         if invoice.get("sent_at"):
             st.caption(f"Sent to client on {invoice['sent_at'].strftime('%d %b %Y')}.")
@@ -77,7 +88,7 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
                 st.toast("Marked sent to client.", icon="✅")
                 st.rerun()
 
-    if user["role"] == ROLE_ADMIN and invoice["status"] == "approved":
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] == "approved":
         st.write("")
         with st.expander("Mark as paid"):
             with st.form(key="inv_paid_form"):
