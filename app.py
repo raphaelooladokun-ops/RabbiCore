@@ -22,6 +22,7 @@ from core.immigration import sync_quota_cerpac_gate
 from views import (
     billing,
     capture,
+    hidden_jobs,
     home_admin,
     home_client,
     home_principal,
@@ -97,6 +98,7 @@ NAV = {
         ("Immigration", immigration.render),
         ("Billing", billing.render),
         ("Users", users.render),
+        ("Hidden Jobs", hidden_jobs.render),
         ("My Queue", home_specialist.render),
         ("My Jobs", home_client.render),
     ],

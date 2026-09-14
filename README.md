@@ -206,6 +206,57 @@ like a role label no matter what the code did with them. They're now
 Adaeze Chukwu (principal) and Femi Okonkwo (admin); the emails/passwords
 those two log in with are unchanged.
 
+**User list now shows Created.** Each row in the Users list shows the
+date and time that login was created (`staff.created_at`, already there
+since the very first schema — this only surfaces it in the UI), formatted
+the same way comment timestamps already are (`%d %b %Y, %H:%M`).
+
+## Hide / delete jobs (super_admin only)
+
+Clearing out demo/test jobs without losing the register's integrity, or
+genuinely destroying a record when that's really what's wanted — two
+separate, deliberately distinct actions:
+
+- **Hide** is soft and reversible. A hidden job (`job.hidden`, plus
+  `hidden_at`/`hidden_by` for an audit trail) stays in the database, but a
+  single change makes it disappear everywhere at once: `_JOB_SELECT` — the
+  one query every normal read path in `models.py` builds on (`get_job`,
+  `list_jobs`, invoicing lookups, duplicate detection, dependency lookups,
+  all of it) — now carries `WHERE j.hidden = FALSE` as its base filter, so
+  every list, count, dashboard stat, and detail page for every role
+  (principal, admin, specialist, client) excludes it automatically, with
+  no per-view filtering to remember or forget. The `blocked_by` join and
+  the `blocking_count` subquery are guarded the same way, so a hidden
+  job's `job_id`/status never leaks into another job's "Depends on" line
+  or blocking count either — and `is_actually_blocked()` now treats a
+  hidden blocker as resolved (checking the *joined* `blocked_by_job_code`
+  rather than the raw FK), so a job that depended on one isn't left
+  permanently stuck.
+- **Bulk hide.** The register's "All jobs" table, for `super_admin` only,
+  gets a checkbox per row plus "Select all" and a "Hide selected (N)"
+  button — clearing a batch of test jobs is one click, not one job at a
+  time. A single job can also be hidden from its own detail page (a
+  "Danger zone" section, `super_admin` only).
+- **Hidden Jobs** is a new `super_admin`-only nav page listing exactly
+  what's hidden (`models.list_hidden_jobs()`, the one place that queries
+  past the `_JOB_SELECT` filter) with an **Unhide** button per row.
+- **Delete** is real and permanent, and kept deliberately separate from
+  hide — its own section, its own explicit "I understand this cannot be
+  undone" confirmation checkbox before the button is even clickable, both
+  on a job's own detail page and from Hidden Jobs. It refuses outright if
+  the job has ever been on an invoice (`invoice_line` references it) —
+  that's real accounting history, not something a cleanup action should
+  silently erase; hide it instead, or take it off the invoice first. Any
+  other job that depended on the deleted one is unblocked the same way it
+  would be if that job had been marked done (not just left with a dangling
+  reference and no way to self-heal) — job_extension/expense/comment/
+  document rows all cascade automatically.
+
+**Judgement call:** an already-issued invoice's own line items and total
+are untouched by hiding the job behind them — those are a historical
+financial document, not a live stat, so hiding doesn't rewrite them
+(mirrors why delete refuses an invoiced job outright, just non-destructively).
+
 ## The Immigration module — the first specialist module
 
 This extends the shared job spine — it does not replace it. An immigration

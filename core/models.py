@@ -254,20 +254,32 @@ def _json(value) -> str:
 
 # ---------------------------------------------------------------------------
 # Job reads
+#
+# _JOB_SELECT_BASE has no visibility filter — only the dedicated hidden-jobs
+# functions query it directly. _JOB_SELECT (every normal read path) appends
+# "WHERE j.hidden = FALSE", so hiding a job is a single-point-of-truth cut:
+# every call site below appends "AND ..." to it rather than "WHERE ...",
+# which is what actually keeps a hidden job out of every list, count, and
+# detail page for every role without each function re-implementing the
+# filter. The blocked_by join and blocking_count subquery are also guarded
+# so a hidden job never leaks into another job's "Depends on" line or
+# blocking count either.
 # ---------------------------------------------------------------------------
-_JOB_SELECT = """
+_JOB_SELECT_BASE = """
     SELECT j.*, c.name AS client_name, s.name AS owner_name,
            sc.name AS service_name, sc.pillar AS service_pillar,
            b.job_id AS blocked_by_job_code, b.status AS blocked_by_status, b.title AS blocked_by_title,
            i.invoice_code AS invoice_code, i.status AS invoice_status,
-           (SELECT COUNT(*) FROM job d WHERE d.blocked_by = j.id AND d.status = 'blocked') AS blocking_count
+           (SELECT COUNT(*) FROM job d WHERE d.blocked_by = j.id AND d.status = 'blocked' AND d.hidden = FALSE)
+               AS blocking_count
     FROM job j
     LEFT JOIN client c ON c.id = j.client_id
     LEFT JOIN staff s ON s.id = j.owner_id
     LEFT JOIN service_catalogue sc ON sc.code = j.service_type
-    LEFT JOIN job b ON b.id = j.blocked_by
+    LEFT JOIN job b ON b.id = j.blocked_by AND b.hidden = FALSE
     LEFT JOIN invoice i ON i.id = j.invoice_id
 """
+_JOB_SELECT = _JOB_SELECT_BASE + " WHERE j.hidden = FALSE"
 
 
 def _resync_stale_blocked() -> None:
@@ -285,6 +297,7 @@ def _resync_stale_blocked() -> None:
         LEFT JOIN client c ON c.id = j.client_id
         LEFT JOIN job_extension je ON je.job_id = j.id
         WHERE j.status = 'blocked' AND b.status IN ('done', 'closed')
+          AND j.hidden = FALSE AND b.hidden = FALSE
           AND COALESCE((je.attributes->>'linked_quota_job_id')::int, -1) IS DISTINCT FROM j.blocked_by
         """
     )
@@ -303,12 +316,12 @@ def _resync_stale_blocked() -> None:
 
 def get_job(job_pk: int):
     _resync_stale_blocked()
-    return query_one(_JOB_SELECT + " WHERE j.id = %s", (job_pk,))
+    return query_one(_JOB_SELECT + " AND j.id = %s", (job_pk,))
 
 
 def get_job_by_job_id(job_id: str):
     _resync_stale_blocked()
-    return query_one(_JOB_SELECT + " WHERE j.job_id = %s", (job_id,))
+    return query_one(_JOB_SELECT + " AND j.job_id = %s", (job_id,))
 
 
 def list_jobs(
@@ -322,7 +335,7 @@ def list_jobs(
     search: str | None = None,
 ) -> list:
     _resync_stale_blocked()
-    sql = _JOB_SELECT + " WHERE 1=1"
+    sql = _JOB_SELECT + " AND 1=1"
     params: list = []
     if status:
         sql += " AND j.status = %s"
@@ -350,7 +363,7 @@ def list_jobs(
 
 
 def list_jobs_for_invoice(invoice_id: int) -> list:
-    return query(_JOB_SELECT + " WHERE j.invoice_id = %s ORDER BY j.created_at", (invoice_id,))
+    return query(_JOB_SELECT + " AND j.invoice_id = %s ORDER BY j.created_at", (invoice_id,))
 
 
 def list_unbilled_jobs() -> list:
@@ -358,7 +371,7 @@ def list_unbilled_jobs() -> list:
     invoices up front, so a freshly logged job is exactly as invoiceable as
     a finished one. Newest first."""
     return query(
-        _JOB_SELECT + " WHERE j.invoice_id IS NULL AND j.status <> 'dismissed' "
+        _JOB_SELECT + " AND j.invoice_id IS NULL AND j.status <> 'dismissed' "
         "ORDER BY j.created_at DESC"
     )
 
@@ -370,7 +383,7 @@ def find_potential_duplicate(client_id: int | None, service_type: str | None):
     if not client_id or not service_type:
         return None
     return query_one(
-        _JOB_SELECT + " WHERE j.client_id = %s AND j.service_type = %s "
+        _JOB_SELECT + " AND j.client_id = %s AND j.service_type = %s "
         "AND j.status NOT IN ('dismissed', 'closed') ORDER BY j.created_at DESC LIMIT 1",
         (client_id, service_type),
     )
@@ -381,7 +394,7 @@ def list_jobs_available_for_invoice(client_id: int, invoice_id: int | None = Non
     front, so most of these will still be 'new' — plus, when revising an
     existing invoice, the jobs already on THAT invoice, so the admin can
     review and adjust its composition."""
-    sql = _JOB_SELECT + " WHERE j.client_id = %s AND j.status <> 'dismissed' AND (j.invoice_id IS NULL"
+    sql = _JOB_SELECT + " AND j.client_id = %s AND j.status <> 'dismissed' AND (j.invoice_id IS NULL"
     params: list = [client_id]
     if invoice_id:
         sql += " OR j.invoice_id = %s"
@@ -409,7 +422,73 @@ def set_job_extension(job_pk: int, attributes: dict) -> None:
 def list_blocked_dependents(job_pk: int) -> list:
     """Jobs currently blocked_by this one — used to surface, on the blocking
     job itself, that it's holding up someone else's work."""
-    return query(_JOB_SELECT + " WHERE j.blocked_by = %s AND j.status = 'blocked'", (job_pk,))
+    return query(_JOB_SELECT + " AND j.blocked_by = %s AND j.status = 'blocked'", (job_pk,))
+
+
+# ---------------------------------------------------------------------------
+# Hiding & deleting jobs — super_admin only. Hiding is the soft, reversible
+# cut (the job stays in the database, just excluded by _JOB_SELECT — see
+# above); deleting is real and permanent, kept deliberately separate and
+# harder to reach. Neither is exposed to any other role.
+# ---------------------------------------------------------------------------
+def hide_jobs(job_pks: list, actor_id: int) -> int:
+    """Hide one or many jobs in a single statement (the bulk-hide action) —
+    a single hide_job(pk) is just this called with a one-item list."""
+    if not job_pks:
+        return 0
+    execute(
+        "UPDATE job SET hidden = TRUE, hidden_at = now(), hidden_by = %s WHERE id = ANY(%s)",
+        (actor_id, list(job_pks)),
+    )
+    return len(job_pks)
+
+
+def unhide_job(job_pk: int) -> None:
+    execute("UPDATE job SET hidden = FALSE, hidden_at = NULL, hidden_by = NULL WHERE id = %s", (job_pk,))
+
+
+def list_hidden_jobs() -> list:
+    return query(_JOB_SELECT_BASE + " WHERE j.hidden = TRUE ORDER BY j.hidden_at DESC NULLS LAST, j.created_at DESC")
+
+
+class JobDeleteError(Exception):
+    pass
+
+
+def delete_job(job_pk: int) -> None:
+    """Permanently remove a job — distinct from hiding, and deliberately
+    harder to undo. Refuses if the job has ever been on an invoice
+    (invoice_line references it): that's real accounting history, not
+    something a cleanup action should silently erase — hide it instead, or
+    take it off the invoice first. job_extension, job_expense, job_comment
+    and job_document all cascade automatically.
+
+    Any other job depending on this one (blocked_by) is resolved first —
+    same as when a blocker is marked done, not just a dangling reference
+    nulled out: a dependent left with blocked_by cleared but status still
+    'blocked' would never self-heal (the resync sweep only considers jobs
+    that still have a blocker to check)."""
+    on_invoice = query_one("SELECT 1 FROM invoice_line WHERE job_id = %s", (job_pk,))
+    if on_invoice:
+        raise JobDeleteError(
+            "This job is on an invoice and can't be permanently deleted — hide it instead, "
+            "or remove it from the invoice first."
+        )
+    dependents = query("SELECT id, owner_id, status, title, job_id FROM job WHERE blocked_by = %s", (job_pk,))
+    for dep in dependents:
+        if dep["status"] == STATUS_BLOCKED:
+            execute(
+                "UPDATE job SET blocked_by = NULL, status = %s, status_reason = NULL WHERE id = %s",
+                (STATUS_IN_PROGRESS, dep["id"]),
+            )
+            if dep["owner_id"]:
+                create_notification(
+                    dep["owner_id"], "unblocked", "job", dep["id"],
+                    f"Unblocked: the job {dep['job_id']} depended on was deleted — {dep['title']} can proceed",
+                )
+        else:
+            execute("UPDATE job SET blocked_by = NULL WHERE id = %s", (dep["id"],))
+    execute("DELETE FROM job WHERE id = %s", (job_pk,))
 
 
 # ---------------------------------------------------------------------------
@@ -457,8 +536,15 @@ def update_job_fields(job_pk: int, **fields) -> None:
 def is_actually_blocked(job: dict) -> bool:
     """True if a dependency is genuinely unresolved right now — distinct from
     the stored `status`, which may still read 'blocked' after the blocker
-    resolves until someone re-saves the job."""
-    return job.get("blocked_by") is not None and job.get("blocked_by_status") not in (STATUS_DONE, STATUS_CLOSED)
+    resolves until someone re-saves the job. Checks `blocked_by_job_code`
+    (from the join in _JOB_SELECT_BASE, which excludes a hidden blocker)
+    rather than the raw `blocked_by` column, so a hidden blocker counts as
+    resolved too — hidden means "as if it doesn't exist," including as a
+    dependency, and the existing STATUS_BLOCKED "Resume" path already
+    handles a dependency that's resolved but hasn't been re-saved yet."""
+    return job.get("blocked_by_job_code") is not None and job.get("blocked_by_status") not in (
+        STATUS_DONE, STATUS_CLOSED,
+    )
 
 
 def can_start_work(job: dict) -> tuple[bool, str | None]:
@@ -882,6 +968,7 @@ def list_upcoming_expiries(category: str | None = None, within_days: int = 90) -
         LEFT JOIN staff s ON s.id = j.owner_id
         WHERE jd.received = TRUE AND jd.expiry_date IS NOT NULL
           AND j.status NOT IN ('{STATUS_DONE}', '{STATUS_CLOSED}', '{STATUS_DISMISSED}')
+          AND j.hidden = FALSE
           AND jd.expiry_date <= CURRENT_DATE + (%s * INTERVAL '1 day')
     """
     params: list = [within_days]

@@ -150,12 +150,23 @@ ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_by INTEGER REFERENCES st
 ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_at TIMESTAMPTZ;
 ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_reason TEXT;
 
+-- super_admin-only soft delete: a hidden job stays in the database (audit
+-- trail, referential integrity) but every normal read path excludes it —
+-- see models._JOB_SELECT — so it's invisible to every role and absent from
+-- every count/stat, exactly like a real delete would be, without losing
+-- the record. Only the dedicated Hidden Jobs view (super_admin only) reads
+-- past this filter.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden_by INTEGER REFERENCES staff(id);
+
 CREATE INDEX IF NOT EXISTS idx_job_client_id ON job(client_id);
 CREATE INDEX IF NOT EXISTS idx_job_owner_id ON job(owner_id);
 CREATE INDEX IF NOT EXISTS idx_job_status ON job(status);
 CREATE INDEX IF NOT EXISTS idx_job_category ON job(category);
 CREATE INDEX IF NOT EXISTS idx_job_invoice_id ON job(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_job_blocked_by ON job(blocked_by);
+CREATE INDEX IF NOT EXISTS idx_job_hidden ON job(hidden) WHERE hidden = TRUE;
 
 -- ---------------------------------------------------------------------------
 -- JOB EXTENSION — category-specific fields attach here, never on job itself.

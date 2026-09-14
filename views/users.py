@@ -95,7 +95,7 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [2.0, 1.1, 1.4, 0.9, 1.2, 1.3]
+_ROW_WIDTHS = [1.8, 1.0, 1.3, 0.8, 1.5, 1.1, 1.2]
 
 
 def _users_list() -> None:
@@ -108,7 +108,7 @@ def _users_list() -> None:
     categories_by_staff = models.list_staff_categories()
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", "", ""]):
+    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", "Created", "", ""]):
         col.markdown(f"**{label}**")
 
     for s in staff:
@@ -118,24 +118,25 @@ def _users_list() -> None:
         specialities = categories_by_staff.get(s["id"], [])
         cols[2].write(", ".join(CATEGORY_LABELS.get(c, c) for c in specialities) if specialities else "—")
         cols[3].write("Active" if s["active"] else "Inactive")
+        cols[4].write(s["created_at"].strftime("%d %b %Y, %H:%M") if s.get("created_at") else "—")
 
         if s["role"] == ROLE_SUPER_ADMIN:
-            cols[4].caption("—")
             cols[5].caption("—")
+            cols[6].caption("—")
             continue
 
         if s["active"]:
-            if cols[4].button("Deactivate", key=f"deact_{s['id']}"):
+            if cols[5].button("Deactivate", key=f"deact_{s['id']}"):
                 models.set_staff_active(s["id"], False)
                 st.toast(f"{s['name']} deactivated.", icon="✅")
                 st.rerun()
         else:
-            if cols[4].button("Reactivate", key=f"react_{s['id']}"):
+            if cols[5].button("Reactivate", key=f"react_{s['id']}"):
                 models.set_staff_active(s["id"], True)
                 st.toast(f"{s['name']} reactivated.", icon="✅")
                 st.rerun()
 
-        if cols[5].button("Reset password", key=f"reset_{s['id']}"):
+        if cols[6].button("Reset password", key=f"reset_{s['id']}"):
             result = models.reset_staff_password(s["id"])
             st.session_state[_CREDENTIALS_KEY] = {
                 "kind": "reset",

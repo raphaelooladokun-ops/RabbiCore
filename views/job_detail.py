@@ -85,6 +85,10 @@ def render(user: dict, job_pk: int) -> None:
 
     _comments(job, user)
 
+    if user["role"] == ROLE_SUPER_ADMIN:
+        st.divider()
+        _danger_zone(job, user)
+
 
 def _header(job: dict) -> None:
     st.markdown(f'<div class="rc-page-title">{job["job_id"]}</div>', unsafe_allow_html=True)
@@ -116,7 +120,7 @@ def _info(job: dict) -> None:
     with c2:
         st.write(f"**Logged:** {job['created_at'].strftime('%d %b %Y')}")
         st.write(f"**SLA date:** {job['sla_date'].isoformat() if job['sla_date'] else '—'}")
-        if job["blocked_by"]:
+        if job["blocked_by_job_code"]:
             blocker_state = "resolved" if not models.is_actually_blocked(job) else "unresolved"
             st.write(f"**Depends on:** {job['blocked_by_job_code']} ({blocker_state})")
 
@@ -478,3 +482,37 @@ def _comments(job: dict, user: dict) -> None:
         st.markdown(f"**{c['author_name']}** · {c['created_at'].strftime('%d %b %Y, %H:%M')}")
         st.write(c["body"])
         st.divider()
+
+
+def _danger_zone(job: dict, user: dict) -> None:
+    """super_admin only. Hide is the everyday cleanup action — soft,
+    reversible, one click. Delete is real and permanent, kept visually and
+    behaviourally separate: its own expander, its own explicit confirmation,
+    never a single click away."""
+    with st.expander("⚠️ Danger zone (super admin)"):
+        st.caption(
+            "Hiding removes this job from every view and every count for every role — "
+            "it's still in the database and can be restored from **Hidden Jobs**."
+        )
+        if st.button("Hide this job", key=f"hide_{job['id']}"):
+            models.hide_jobs([job["id"]], user["id"])
+            st.toast(f"{job['job_id']} hidden.", icon="✅")
+            ui.clear_all_nav()
+            st.rerun()
+
+        st.divider()
+        st.markdown("**Delete permanently**")
+        st.caption("This cannot be undone. The record, its comments, expenses and documents are all gone for good.")
+        confirm = st.checkbox(
+            f"Yes, permanently delete {job['job_id']} — I understand this cannot be undone.",
+            key=f"delconfirm_{job['id']}",
+        )
+        if st.button("Delete permanently", key=f"del_{job['id']}", disabled=not confirm, type="primary"):
+            try:
+                models.delete_job(job["id"])
+            except models.JobDeleteError as e:
+                st.error(str(e))
+            else:
+                st.toast(f"{job['job_id']} permanently deleted.", icon="✅")
+                ui.clear_all_nav()
+                st.rerun()
