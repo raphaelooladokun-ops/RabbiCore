@@ -9,7 +9,15 @@ from core import models
 from core import ui
 from core.auth import current_user, logout, restore_session_from_query_params
 from core.bootstrap import bootstrap_once
-from core.constants import ROLE_ADMIN, ROLE_CLIENT, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST, ROLE_SUPER_ADMIN
+from core.constants import (
+    CATEGORY_LABELS,
+    ROLE_ADMIN,
+    ROLE_CLIENT,
+    ROLE_LABELS,
+    ROLE_PRINCIPAL,
+    ROLE_SPECIALIST,
+    ROLE_SUPER_ADMIN,
+)
 from core.immigration import sync_quota_cerpac_gate
 from views import (
     billing,
@@ -24,6 +32,7 @@ from views import (
     job_detail,
     login,
     register,
+    users,
 )
 
 st.set_page_config(page_title="Rabbi Core", page_icon="📋", layout="wide")
@@ -87,6 +96,7 @@ NAV = {
         ("Register", lambda u: register.render(u)),
         ("Immigration", immigration.render),
         ("Billing", billing.render),
+        ("Users", users.render),
         ("My Queue", home_specialist.render),
         ("My Jobs", home_client.render),
     ],
@@ -112,7 +122,11 @@ def main() -> None:
 
     ui.sidebar_wordmark()
     st.sidebar.markdown(f"**{user['name']}**")
-    st.sidebar.caption(ROLE_LABELS[user["role"]])
+    role_caption = ROLE_LABELS[user["role"]]
+    specialities = models.list_staff_categories().get(user["id"], [])
+    if specialities:
+        role_caption += " — " + ", ".join(CATEGORY_LABELS.get(c, c) for c in specialities)
+    st.sidebar.caption(role_caption)
     if user["role"] == ROLE_SUPER_ADMIN:
         ui.super_admin_badge()
     ui.notification_bell(user)

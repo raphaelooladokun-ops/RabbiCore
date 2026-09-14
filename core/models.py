@@ -3,9 +3,12 @@ these functions and never write SQL themselves."""
 
 from __future__ import annotations
 
+import re
+import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+import bcrypt
 import psycopg2
 
 from core.constants import (
@@ -71,6 +74,78 @@ def list_staff(role: str | None = None, active_only: bool = True) -> list:
         params.append(role)
     sql += " ORDER BY name"
     return query(sql, tuple(params))
+
+
+def get_staff(staff_id: int):
+    return query_one("SELECT * FROM staff WHERE id = %s", (staff_id,))
+
+
+# ---------------------------------------------------------------------------
+# Staff accounts (super_admin only) — creating a real login for a new member
+# of staff, with generated credentials shown once, and deactivating one
+# without ever hard-deleting the record (their jobs/comments/invoices stay
+# attributed to them).
+# ---------------------------------------------------------------------------
+_USERNAME_DOMAIN = "rabbicore.local"
+# Excludes visually ambiguous characters (l/1/I, O/0) so a generated
+# password is easy to read back and type correctly by hand.
+_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _slugify_name(name: str) -> str:
+    ascii_only = re.sub(r"[^a-zA-Z\s]", "", name).strip().lower()
+    parts = ascii_only.split()
+    return ".".join(parts) if parts else "user"
+
+
+def generate_username(name: str) -> str:
+    """A unique login username derived from the person's name — this app has
+    no separate 'email' concept for staff, so the generated username is
+    stored in the same `email` column verify_login() checks against."""
+    base = _slugify_name(name)
+    candidate = f"{base}@{_USERNAME_DOMAIN}"
+    n = 2
+    while query_one("SELECT 1 FROM staff WHERE lower(email) = lower(%s)", (candidate,)):
+        candidate = f"{base}{n}@{_USERNAME_DOMAIN}"
+        n += 1
+    return candidate
+
+
+def generate_password(length: int = 12) -> str:
+    return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def create_staff_account(name: str, role: str) -> dict:
+    """Super-admin-only: create a new staff login with a generated username
+    and password. Returns the new staff row plus the plaintext credentials
+    for one-time display — only the bcrypt hash is ever stored; the
+    plaintext never touches the database."""
+    username = generate_username(name)
+    password = generate_password()
+    row = execute_returning(
+        "INSERT INTO staff (name, email, password_hash, role) VALUES (%s, %s, %s, %s) RETURNING id",
+        (name, username, hash_password(password), role),
+    )
+    return {"staff": get_staff(row["id"]), "username": username, "password": password}
+
+
+def set_staff_active(staff_id: int, active: bool) -> None:
+    execute("UPDATE staff SET active = %s WHERE id = %s", (active, staff_id))
+
+
+def list_staff_categories() -> dict:
+    """staff_id -> the list of module categories they're assigned to
+    (module_specialist), across every module — used to show a specialist's
+    speciality in the user-management list and sidebar."""
+    rows = query("SELECT staff_id, category FROM module_specialist")
+    result: dict = {}
+    for r in rows:
+        result.setdefault(r["staff_id"], []).append(r["category"])
+    return result
 
 
 def list_service_catalogue() -> list:

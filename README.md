@@ -154,6 +154,51 @@ Change or remove these before using the app with real client data.
   job waiting on it automatically moves back to `in_progress` and its owner
   is notified it can proceed — no manual re-save needed.
 
+## User management (super_admin only)
+
+The firm owner creates every other staff login from inside the app — no
+direct database access needed. A **Users** page (visible only to
+`super_admin`) lets them:
+
+- **Create a user** — full name, role (principal / admin / specialist), and
+  for a specialist, their speciality/module (immigration / CIT / state,
+  reusing the same `module_specialist` routing table the Immigration module
+  introduced — so a specialist created here immediately floats to the top
+  of the Owner list in Capture for their module's services).
+- **Get credentials back immediately** — the system generates a username
+  (`firstname.lastname@rabbicore.local`, de-duplicated with a numeric suffix
+  if that name is already taken — nothing here is a real mailbox, it's a
+  login identifier the way `email` has always doubled as one) and a
+  12-character password drawn from an alphabet with the visually ambiguous
+  characters removed (no `l`/`1`/`I`, no `O`/`0`) so it's easy to read back
+  and type correctly. Both are shown in their own `st.code` block — a
+  monospace, one-click-to-copy box — right after creation, with a clear
+  "won't be shown again" warning; only the bcrypt hash is ever written to
+  the database, exactly like every other staff password.
+- **See and manage every user** — name, role, speciality, active/inactive,
+  with a Deactivate/Reactivate toggle. Deactivating never deletes the row:
+  `verify_login()` already refuses inactive accounts, so it's an instant,
+  reversible access cut — their past jobs, comments and invoices keep
+  their name attached exactly as before.
+- A user created this way can log in immediately with the generated
+  username/password, straight into their correct role (and, for a
+  specialist, their speciality) view — same `verify_login()` path every
+  other account uses, no special-casing.
+
+**Personalisation.** Every screen already greeted people by their first
+name (`home_*.py`'s `"Good to see you, {first name}"`, `home_client.py`'s
+`"Welcome, {first name}"`) — the sidebar identity block now does the same
+explicitly: the person's full name stays the bold, primary line, and the
+smaller caption under it is their role *plus* their speciality when they
+have one (e.g. "Specialist — Immigration"), reusing the same
+`module_specialist` lookup the Users list uses. Two demo accounts were
+also renamed for this to actually read as personalisation in a demo —
+`"EC (Principal)"` and `"Ops Coordinator"` were job-title-shaped strings
+sitting in the `name` column, not real names, so their own greetings read
+like a role label no matter what the code did with them. They're now
+Adaeze Chukwu (principal) and Femi Okonkwo (admin); the emails/passwords
+those two log in with are unchanged.
+
 ## The Immigration module — the first specialist module
 
 This extends the shared job spine — it does not replace it. An immigration
