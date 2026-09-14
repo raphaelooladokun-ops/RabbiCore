@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS service_catalogue (
     sort_order      INTEGER NOT NULL DEFAULT 0
 );
 
+-- NULL for a one-off service; 'monthly'/'yearly' for one that recurs on a
+-- schedule (e.g. Monthly VAT Returns, Annual Return) — CIT is the first
+-- module with recurring obligations, but this lives on the generic service
+-- catalogue, not a CIT-specific table, so State's own recurring filings
+-- reuse the exact same mechanism (models.create_next_cycle_job) later.
+ALTER TABLE service_catalogue ADD COLUMN IF NOT EXISTS recurring_frequency TEXT;
+
 -- ---------------------------------------------------------------------------
 -- INVOICE — one invoice groups many jobs. Admin creates (submits for
 -- approval); principal approves. A job can only close once its invoice is

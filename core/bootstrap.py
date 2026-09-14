@@ -36,15 +36,16 @@ def seed_catalogue() -> None:
     for i, svc in enumerate(SERVICE_CATALOGUE):
         execute(
             """
-            INSERT INTO service_catalogue (code, pillar, name, fields, sort_order)
-            VALUES (%s, %s, %s, %s::jsonb, %s)
+            INSERT INTO service_catalogue (code, pillar, name, fields, sort_order, recurring_frequency)
+            VALUES (%s, %s, %s, %s::jsonb, %s, %s)
             ON CONFLICT (code) DO UPDATE SET
                 pillar = EXCLUDED.pillar,
                 name = EXCLUDED.name,
                 fields = EXCLUDED.fields,
-                sort_order = EXCLUDED.sort_order
+                sort_order = EXCLUDED.sort_order,
+                recurring_frequency = EXCLUDED.recurring_frequency
             """,
-            (svc["code"], svc["pillar"], svc["name"], _to_json(svc["fields"]), i),
+            (svc["code"], svc["pillar"], svc["name"], _to_json(svc["fields"]), i, svc.get("recurring_frequency")),
         )
 
 

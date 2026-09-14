@@ -54,16 +54,28 @@ SERVICE_CATALOGUE = [
     {"code": "CIT-REGISTRATION", "pillar": "CIT", "name": "CIT — Registration (Tax & VAT Certificate)", "fields": []},
     {"code": "CIT-TRADE-PORTAL", "pillar": "CIT", "name": "CIT — Trade Portal", "fields": []},
     {"code": "CIT-TIN-UPDATE", "pillar": "CIT", "name": "CIT — TIN Update & Validation", "fields": []},
-    {"code": "CIT-VAT-MONTHLY", "pillar": "CIT", "name": "CIT — Monthly VAT Returns", "fields": []},
-    {"code": "CIT-VAT-YEARLY-ANALYSIS", "pillar": "CIT", "name": "CIT — Yearly VAT Analysis", "fields": []},
-    {"code": "CIT-VAT-WHT-MONITORING", "pillar": "CIT", "name": "CIT — VAT & WHT Monitoring", "fields": []},
+    {
+        "code": "CIT-VAT-MONTHLY", "pillar": "CIT", "name": "CIT — Monthly VAT Returns", "fields": [],
+        "recurring_frequency": "monthly",
+    },
+    {
+        "code": "CIT-VAT-YEARLY-ANALYSIS", "pillar": "CIT", "name": "CIT — Yearly VAT Analysis", "fields": [],
+        "recurring_frequency": "yearly",
+    },
+    {
+        "code": "CIT-VAT-WHT-MONITORING", "pillar": "CIT", "name": "CIT — VAT & WHT Monitoring", "fields": [],
+        "recurring_frequency": "monthly",
+    },
     {"code": "CIT-TP-FILINGS", "pillar": "CIT", "name": "CIT — TP Filings (Transfer Pricing)", "fields": []},
     {"code": "CIT-TAX-AUDIT", "pillar": "CIT", "name": "CIT — Tax Audit (NRS)", "fields": []},
     {"code": "CIT-TAX-INVESTIGATION", "pillar": "CIT", "name": "CIT — Tax Investigation (NRS)", "fields": []},
     {"code": "CIT-DESK-EXAM", "pillar": "CIT", "name": "CIT — Desk Examination (NRS)", "fields": []},
     {"code": "CIT-STATUTORY-AUDIT", "pillar": "CIT", "name": "CIT — Statutory Audit (AFS)", "fields": []},
     {"code": "CIT-TCC", "pillar": "CIT", "name": "CIT — TCC (Tax Clearance Certificate)", "fields": []},
-    {"code": "CIT-ANNUAL-RETURN", "pillar": "CIT", "name": "CIT — Annual Return", "fields": []},
+    {
+        "code": "CIT-ANNUAL-RETURN", "pillar": "CIT", "name": "CIT — Annual Return", "fields": [],
+        "recurring_frequency": "yearly",
+    },
 
     # ---- PILLAR 4 — State Matters --------------------------------------------
     {"code": "STATE-PAYE-REG", "pillar": "State", "name": "STATE — PAYE Registration", "fields": []},

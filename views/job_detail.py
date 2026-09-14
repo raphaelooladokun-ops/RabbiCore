@@ -8,6 +8,7 @@ from datetime import date
 
 import streamlit as st
 
+from core import cit
 from core import immigration
 from core import models
 from core import ui
@@ -28,6 +29,20 @@ from core.constants import (
     STATUS_NEW,
     humanize,
 )
+
+# Every module's custom gate (job_extension.attributes['active_gate']) gets
+# its own message here — the dispatch itself is generic, so a future
+# module's gate only ever needs a one-line addition to this dict.
+_GATE_MESSAGES = {
+    immigration.ACTIVE_GATE_QUOTA: (
+        "Blocked — linked quota position has less than 6 months validity remaining. "
+        "This unblocks automatically once the quota is renewed."
+    ),
+    cit.ACTIVE_GATE_TCC: (
+        "Blocked — this client has other outstanding CIT obligations. "
+        "This unblocks automatically once they're all cleared."
+    ),
+}
 
 
 def render(user: dict, job_pk: int) -> None:
@@ -51,6 +66,9 @@ def render(user: dict, job_pk: int) -> None:
     if job["category"] == "immigration":
         st.divider()
         _immigration_section(job, user)
+    elif job["category"] == "cit":
+        st.divider()
+        _cit_section(job, user)
     st.divider()
 
     editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
@@ -142,9 +160,13 @@ def _info(job: dict) -> None:
         st.caption(f"Internal notes: {job['internal_notes']}")
 
 
-def _immigration_section(job: dict, user: dict) -> None:
-    st.markdown("#### Immigration checklist")
-
+def _document_checklist_section(job: dict, user: dict, *, on_expiry_change=None) -> bool:
+    """Generic across every module: the checklist + readiness badge, ticked
+    off document by document. `on_expiry_change`, if given, is called after
+    an expiry date is edited — the one module-specific follow-up (e.g.
+    immigration's quota-gate re-check) a checklist edit can trigger. Returns
+    whether this job's owner is allowed to edit it, so callers can reuse the
+    same editable check for their own module-specific controls below it."""
     docs = models.list_job_documents(job["id"])
     received, required = models.job_document_readiness(job["id"])
     if required == 0:
@@ -181,12 +203,22 @@ def _immigration_section(job: dict, user: dict) -> None:
             )
             if new_expiry != d["expiry_date"]:
                 models.set_job_document_expiry(d["id"], new_expiry)
-                immigration.sync_quota_cerpac_gate(actor_id=user["id"])
+                if on_expiry_change:
+                    on_expiry_change()
                 st.rerun()
             if d["expiry_date"]:
                 cols[3].caption(models.EXPIRY_URGENCY_LABELS[models.expiry_urgency(d["expiry_date"])])
         else:
             cols[2].write("—")
+
+    return editable
+
+
+def _immigration_section(job: dict, user: dict) -> None:
+    st.markdown("#### Immigration checklist")
+    editable = _document_checklist_section(
+        job, user, on_expiry_change=lambda: immigration.sync_quota_cerpac_gate(actor_id=user["id"]),
+    )
 
     if job["service_type"] == immigration.CERPAC_PRINCIPAL_SERVICE_CODE:
         st.write("")
@@ -233,6 +265,83 @@ def _quota_link_control(job: dict, user: dict, editable: bool) -> None:
             immigration.set_quota_link(job["id"], options[choice], actor_id=user["id"])
             st.toast("Saved.", icon="✅")
             st.rerun()
+
+
+def _cit_section(job: dict, user: dict) -> None:
+    st.markdown("#### CIT checklist")
+    _document_checklist_section(job, user)
+
+    frequency = models.is_recurring_service(job["service_type"]) if job["service_type"] else None
+    if frequency:
+        st.write("")
+        _recurring_info(job, frequency)
+
+    if job["service_type"] == cit.TCC_SERVICE_CODE:
+        st.write("")
+        _tcc_obligations_panel(job)
+
+    if job["service_type"] == cit.ANNUAL_RETURN_SERVICE_CODE:
+        desk_exam_id = models.get_job_extension(job["id"]).get("desk_exam_job_id")
+        if desk_exam_id:
+            st.write("")
+            desk_exam = models.get_job(desk_exam_id)
+            if desk_exam:
+                st.info("📋 Desk Examination auto-created for this filing:")
+                if st.button(
+                    f"{desk_exam['job_id']} — {desk_exam['title']}", key=f"jd_{job['id']}_deskexam", type="tertiary",
+                ):
+                    ui.go_to_job(desk_exam["id"])
+
+    triggered_by = models.get_job_extension(job["id"]).get("triggered_by_annual_return_job_id")
+    if triggered_by:
+        st.write("")
+        parent = models.get_job(triggered_by)
+        if parent:
+            st.caption("Auto-created following the Annual Return filing below.")
+            if st.button(f"{parent['job_id']} — {parent['title']}", key=f"jd_{job['id']}_parentreturn", type="tertiary"):
+                ui.go_to_job(parent["id"])
+
+
+def _recurring_info(job: dict, frequency: str) -> None:
+    attrs = models.get_job_extension(job["id"])
+    with st.expander(f"Recurring — {frequency}", expanded=False):
+        st.caption(
+            f"This service recurs {frequency}. Marking this job done automatically creates the next cycle's job."
+        )
+        prev_id = attrs.get("previous_cycle_job_id")
+        next_id = attrs.get("next_cycle_job_id")
+        if prev_id:
+            prev_job = models.get_job(prev_id)
+            if prev_job and st.button(
+                f"Previous cycle: {prev_job['job_id']}", key=f"jd_{job['id']}_prevcycle", type="tertiary",
+            ):
+                ui.go_to_job(prev_job["id"])
+        if next_id:
+            next_job = models.get_job(next_id)
+            if next_job and st.button(
+                f"Next cycle: {next_job['job_id']}", key=f"jd_{job['id']}_nextcycle", type="tertiary",
+            ):
+                ui.go_to_job(next_job["id"])
+        elif not prev_id and not next_id:
+            st.caption("No other cycle yet — the next one is created automatically once this is marked done.")
+
+
+def _tcc_obligations_panel(job: dict) -> None:
+    with st.expander("Outstanding CIT obligations", expanded=True):
+        outstanding = cit.list_outstanding_obligations(job["client_id"], exclude_job_pk=job["id"])
+        if outstanding:
+            st.error(
+                f"⛔ {len(outstanding)} other outstanding CIT job(s) for this client — "
+                "this TCC is blocked until they're all done or closed."
+            )
+            for o in outstanding:
+                if st.button(
+                    f"{o['job_id']} — {o['service_name'] or o['title']} ({o['status']})",
+                    key=f"jd_{job['id']}_obl_{o['id']}", type="tertiary",
+                ):
+                    ui.go_to_job(o["id"])
+        else:
+            st.success("✅ No other outstanding CIT obligations for this client.")
 
 
 def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
@@ -296,16 +405,15 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
         # Reaching here means blocked_now was False above — the dependency
         # (if any) is resolved, or this was a manual block with no
         # dependency — either way, resuming is normally available. The one
-        # exception: the quota->CERPAC gate is date-driven, not
-        # blocker-status-driven, so is_actually_blocked() can read False
-        # here even while the gate is still active — never let a manual
-        # Resume bypass it. Only immigration.sync_quota_cerpac_gate() clears
-        # it, automatically, once the quota is actually renewed.
-        if job["category"] == "immigration" and immigration.is_quota_gate_active(job):
-            st.warning(
-                "Blocked — linked quota position has less than 6 months validity remaining. "
-                "This unblocks automatically once the quota is renewed."
-            )
+        # exception: a module's own custom gate (immigration's quota
+        # validity, CIT's TCC obligations) is driven by something other
+        # than "is the blocker done/closed," so is_actually_blocked() can
+        # read False here even while the gate is still active — never let a
+        # manual Resume bypass it. Only that gate's own sync function clears
+        # it, automatically, once the underlying condition resolves.
+        gate_kind = models.get_job_extension(job["id"]).get("active_gate")
+        if gate_kind:
+            st.warning(_GATE_MESSAGES.get(gate_kind, "Blocked by an active dependency gate."))
             return
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
             _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
@@ -316,9 +424,21 @@ def _apply_status(job_pk: int, new_status: str, reason: str | None = None, actor
         models.set_status(job_pk, new_status, reason, actor_id=actor_id)
     except models.JobRuleError as e:
         st.error(str(e))
-    else:
-        st.toast("Status updated.", icon="✅")
-        st.rerun()
+        return
+
+    if new_status == STATUS_DONE:
+        # Generic: any recurring service spawns its next cycle automatically.
+        models.create_next_cycle_job(job_pk, actor_id=actor_id)
+        job = models.get_job(job_pk)
+        if job and job["category"] == "cit":
+            if job["service_type"] == cit.ANNUAL_RETURN_SERVICE_CODE:
+                cit.spawn_desk_examination(job_pk, actor_id=actor_id)
+            # This job finishing may be exactly what an outstanding TCC for
+            # the same client was waiting on.
+            cit.sync_tcc_gate(actor_id=actor_id)
+
+    st.toast("Status updated.", icon="✅")
+    st.rerun()
 
 
 def _dependency_control(job: dict, key_prefix: str, actor_id: int) -> None:
@@ -389,6 +509,8 @@ def _duplicate_control(job: dict, key_prefix: str, user: dict) -> None:
                 except models.JobRuleError as e:
                     st.error(str(e))
                 else:
+                    if job["category"] == "cit":
+                        cit.sync_tcc_gate(actor_id=user["id"])
                     st.toast("Marked as duplicate.", icon="✅")
                     st.rerun()
 
@@ -420,6 +542,8 @@ def _invoice_section(job: dict, user: dict) -> None:
                 except models.JobRuleError as e:
                     st.error(str(e))
                 else:
+                    if job["category"] == "cit":
+                        cit.sync_tcc_gate(actor_id=user["id"])
                     st.toast("Job closed.", icon="✅")
                     st.rerun()
 

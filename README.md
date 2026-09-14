@@ -546,13 +546,99 @@ is used for the small number of jobs with no catalogue service — a dismissed
 item, for instance. Flagging this in case a different mapping is intended
 once the CAC module is planned.
 
+## The CIT module — the second specialist module
+
+Same shared job spine as Immigration, extended the same way: a CIT job is a
+`job` with `category = 'cit'`, plus specialist detail attached via the same
+extension mechanisms — capture, register, invoicing, notifications,
+comments, expenses, roles, hide/delete and user management all keep working
+unchanged. The 13 CIT service types (Registration, Trade Portal, TIN Update
+& Validation, Monthly VAT Returns, Yearly VAT Analysis, VAT & WHT
+Monitoring, TP Filings, Tax Audit, Tax Investigation, Desk Examination,
+Statutory Audit, TCC, Annual Return) reuse the exact same generic
+document-checklist and expiry mechanisms Immigration established — no new
+per-service Python, just new `document_type`/`service_document_requirement`
+rows. Two pieces of shared infrastructure were generalized while building
+this, so State can reuse them unchanged:
+
+- `models._resync_stale_blocked()`'s self-heal guard used to check
+  specifically for immigration's `linked_quota_job_id` extension key; it now
+  checks generically for the presence of an `active_gate` key, so any
+  module's custom gate (immigration's quota link, CIT's TCC gate below, and
+  whatever State needs next) is left alone by the generic dependency-resolve
+  sweep, not just immigration's.
+- `models.force_block(job_pk, blocker_pk, reason)` / `force_unblock(job_pk)`
+  were extracted from immigration's block/unblock logic (previously raw SQL
+  duplicated inline) and are now shared by both `core/immigration.py` and
+  `core/cit.py`.
+
+CIT's own additions:
+
+- **Recurring jobs (generic, reusable).** Several CIT services run on a
+  cycle rather than one-off: Monthly VAT Returns and VAT & WHT Monitoring
+  monthly; Annual Return and Yearly VAT Analysis yearly. A new
+  `service_catalogue.recurring_frequency` column (`monthly`/`yearly`/null)
+  marks which; `models.create_next_cycle_job()` is called when such a job is
+  marked done and auto-creates next cycle's job for the same client, with
+  its due date rolled forward by `models._add_months()` (day-clamped
+  calendar-month arithmetic, no new dependency) and a bidirectional
+  `previous_cycle_job_id`/`next_cycle_job_id` link so it only ever fires
+  once per completed job. `models.list_recurring_jobs()` surfaces every
+  outstanding recurring job by due date on the CIT dashboard, so a monthly
+  VAT return or yearly filing can't quietly stop being generated. None of
+  this is CIT-specific — State's own monthly PAYE/WHT and payroll filings
+  can flip on the same behaviour by setting `recurring_frequency` in the
+  catalogue, no new code required.
+- **The TCC gate (`core/cit.py`, the CIT-specific rule).** A Tax Clearance
+  Certificate job is blocked while the client has any other outstanding
+  (not done/closed) CIT job — an unresolved audit, investigation, or unfiled
+  return. This mirrors immigration's quota gate exactly in shape: it's
+  status-driven rather than date-driven, `core/cit.py` owns setting/clearing
+  `blocked_by` directly via `force_block`/`force_unblock`, the job's
+  extension is marked with `active_gate = "tcc_obligations"` so the generic
+  self-heal leaves it alone, and it re-checks immediately on every relevant
+  status change (a new CIT job logged for the client, an outstanding job
+  resolved) plus a 5-minute sweep as a time-based safety net. When every
+  outstanding obligation clears, the TCC job auto-unblocks and its owner is
+  notified — no manual "Resume" available while the gate is active, same as
+  the quota gate.
+- **The Desk Examination auto-trigger (`core/cit.py`).** A Desk Examination
+  isn't a separate request — it follows an Annual Return by rule. Marking a
+  CIT Annual Return job done auto-creates the linked Desk Examination job
+  for that client via `spawn_desk_examination()`, idempotent per filing and
+  cross-linked both directions (`desk_exam_job_id` on the Annual Return,
+  `triggered_by_annual_return_job_id` on the Desk Examination) so the job
+  detail page can show the link either way round.
+- **Expiry tracking, specialist routing, the data boundary.** All identical
+  to Immigration's, reused as-is: `models.list_upcoming_expiries()` filtered
+  to `category = 'cit'` (TCC's own validity window is the main case here);
+  `module_specialist` for CIT-speciality routing in Capture; `job_document`
+  stores only a document type code, received flag/date and expiry — never
+  the underlying financial documents or filings themselves.
+
+**Judgement calls worth flagging:**
+- "Outstanding CIT obligations" for the TCC gate is read broadly — *any*
+  other open CIT job for the client, not narrowly limited to just audits,
+  investigations and unfiled returns (the brief's own three named examples).
+  Read those examples as illustrative of "outstanding obligations" as a
+  category, not an exhaustive list.
+- Both new triggers (recurring next-cycle spawn, Desk Exam auto-trigger)
+  auto-create the follow-on job rather than merely prompting to create one,
+  for consistency with each other and with how the rest of the app already
+  behaves — matches the brief's own framing ("the system should be able to
+  generate... rather than requiring someone to remember").
+- Trade Portal, TIN Update & Validation, and CIT's own TCC and Annual Return
+  checklists weren't in the attached documents file; reasonable minimal
+  checklists were constructed for each (mirrors Immigration's "Business
+  Permit Amendment" precedent for the same situation).
+
 ## Not built yet (by design)
 
-CIT, State Matters and CAC specialist modules — built on the same generic
-document-checklist/expiry/module-specialist mechanisms Immigration just
-established, plus whatever module-specific rule each one needs (its own
-`core/cit.py` / `core/state.py`, following `core/immigration.py`'s pattern).
-Any sensitive personal data (passport numbers, CERPAC numbers, uploaded
-documents) stays out of this app by design — see The data boundary above —
-and any module that needs to hold that data directly moves to a private
-host at that point.
+State Matters and CAC specialist modules — built on the same generic
+document-checklist/expiry/module-specialist/recurring-job mechanisms
+Immigration and CIT just established, plus whatever module-specific rule
+each one needs (its own `core/state.py`, following `core/immigration.py`
+and `core/cit.py`'s pattern). Any sensitive personal data (passport
+numbers, CERPAC numbers, uploaded documents, tax filings) stays out of this
+app by design — see The data boundary above — and any module that needs to
+hold that data directly moves to a private host at that point.

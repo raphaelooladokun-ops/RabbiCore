@@ -18,10 +18,12 @@ from core.constants import (
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
 )
+from core.cit import sync_tcc_gate
 from core.immigration import sync_quota_cerpac_gate
 from views import (
     billing,
     capture,
+    cit,
     hidden_jobs,
     home_admin,
     home_client,
@@ -67,12 +69,25 @@ def _quota_gate_sweep_ticket() -> bool:
 
 _quota_gate_sweep_ticket()
 
+
+@st.cache_resource(ttl=300, show_spinner=False)
+def _tcc_gate_sweep_ticket() -> bool:
+    """Same pattern: re-checks every open TCC job at most once every 5
+    minutes, so a client's obligations clearing (or a new one appearing)
+    is caught even if nobody happened to touch the TCC job itself."""
+    sync_tcc_gate()
+    return True
+
+
+_tcc_gate_sweep_ticket()
+
 NAV = {
     ROLE_PRINCIPAL: [
         ("Overview", home_principal.render),
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
         ("Immigration", immigration.render),
+        ("CIT", cit.render),
         ("Billing", billing.render),
     ],
     ROLE_ADMIN: [
@@ -80,6 +95,7 @@ NAV = {
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
         ("Immigration", immigration.render),
+        ("CIT", cit.render),
         ("Billing", billing.render),
     ],
     ROLE_SPECIALIST: [
@@ -96,6 +112,7 @@ NAV = {
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
         ("Immigration", immigration.render),
+        ("CIT", cit.render),
         ("Billing", billing.render),
         ("Users", users.render),
         ("Hidden Jobs", hidden_jobs.render),

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core import models
+from core import cit, models
 from core import ui
 from core.constants import SOURCE_CLIENT_EMAIL, SOURCE_LABELS, SOURCE_TEAM_GROUP_FORWARD, STATUS_LABELS_SHORT, humanize
 from core.seed_data import PILLAR_TO_CATEGORY
@@ -174,6 +174,13 @@ def _job_form(user: dict) -> None:
             attributes=attributes,
             waiting_on_client=waiting_on_client.strip() or None,
         )
+
+        if category == "cit":
+            # A brand-new CIT job (another audit, an unfiled return...) can
+            # be exactly what should now block an existing TCC for this
+            # client — re-check right away rather than waiting for the
+            # periodic sweep.
+            cit.sync_tcc_gate(actor_id=user["id"])
 
         st.success(f"Logged — **{job['job_id']}**, owner {owner_name}.")
         st.code(f"Logged, {job['job_id']}, owner {owner_name}", language=None)

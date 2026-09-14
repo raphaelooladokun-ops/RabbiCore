@@ -10,9 +10,10 @@ expiry tracking, module-specialist routing) stays generic in
 The gate is date/validity-driven, not status-driven, so it deliberately
 does NOT reuse job_status_guard's blocked_by resolution (which only checks
 whether the blocker is done/closed) — it manages `blocked_by` + `status`
-directly. `models._resync_stale_blocked()` is taught to leave alone any
-job whose extension marks its blocked_by as this kind of link, so the two
-mechanisms never fight over the same job.
+directly via models.force_block/force_unblock. `models._resync_stale_blocked()`
+is taught to leave alone any job whose extension carries an `active_gate`
+key, so a module's own gate and the generic self-heal never fight over the
+same job. CIT's TCC gate (core/cit.py) follows this exact same shape.
 """
 
 from __future__ import annotations
@@ -20,8 +21,8 @@ from __future__ import annotations
 from datetime import date
 
 from core import models
-from core.constants import STATUS_CLOSED, STATUS_DISMISSED, STATUS_DONE, STATUS_IN_PROGRESS
-from core.db import execute, query_one
+from core.constants import STATUS_CLOSED, STATUS_DISMISSED, STATUS_DONE
+from core.db import query_one
 
 QUOTA_SERVICE_CODE = "IMM-QUOTA"
 CERPAC_PRINCIPAL_SERVICE_CODE = "IMM-ECERPAC-PRINCIPAL"
@@ -86,10 +87,7 @@ def set_quota_link(cerpac_job_pk: int, quota_job_pk: int | None, actor_id: int |
     if quota_job_pk:
         sync_quota_cerpac_gate(cerpac_job_pk, actor_id=actor_id)
     elif was_gated and job and job["status"] == "blocked":
-        execute(
-            "UPDATE job SET blocked_by = NULL, status = %s, status_reason = NULL WHERE id = %s",
-            (STATUS_IN_PROGRESS, cerpac_job_pk),
-        )
+        models.force_unblock(cerpac_job_pk)
 
 
 def sync_quota_cerpac_gate(cerpac_job_pk: int | None = None, actor_id: int | None = None) -> None:
@@ -121,10 +119,7 @@ def sync_quota_cerpac_gate(cerpac_job_pk: int | None = None, actor_id: int | Non
         if gate_should_block and not gate_active:
             attrs["active_gate"] = ACTIVE_GATE_QUOTA
             models.set_job_extension(job["id"], attrs)
-            execute(
-                "UPDATE job SET blocked_by = %s, status = 'blocked', status_reason = %s WHERE id = %s",
-                (quota_pk, _GATE_BLOCK_REASON, job["id"]),
-            )
+            models.force_block(job["id"], quota_pk, _GATE_BLOCK_REASON)
             if job["owner_id"] and job["owner_id"] != actor_id:
                 models.create_notification(
                     job["owner_id"], "quota_gate_blocked", "job", job["id"],
@@ -133,10 +128,7 @@ def sync_quota_cerpac_gate(cerpac_job_pk: int | None = None, actor_id: int | Non
         elif not gate_should_block and gate_active:
             attrs.pop("active_gate", None)
             models.set_job_extension(job["id"], attrs)
-            execute(
-                "UPDATE job SET blocked_by = NULL, status = %s, status_reason = NULL WHERE id = %s",
-                (STATUS_IN_PROGRESS, job["id"]),
-            )
+            models.force_unblock(job["id"])
             if job["owner_id"] and job["owner_id"] != actor_id:
                 models.create_notification(
                     job["owner_id"], "quota_gate_unblocked", "job", job["id"],

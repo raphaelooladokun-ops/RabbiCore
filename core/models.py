@@ -298,7 +298,7 @@ def _resync_stale_blocked() -> None:
         LEFT JOIN job_extension je ON je.job_id = j.id
         WHERE j.status = 'blocked' AND b.status IN ('done', 'closed')
           AND j.hidden = FALSE AND b.hidden = FALSE
-          AND COALESCE((je.attributes->>'linked_quota_job_id')::int, -1) IS DISTINCT FROM j.blocked_by
+          AND NOT (COALESCE(je.attributes, '{}'::jsonb) ? 'active_gate')
         """
     )
     for row in stale:
@@ -520,6 +520,31 @@ def set_blocked_by(job_pk: int, blocked_by_pk: int | None, actor_id: int | None 
         raise JobRuleError(str(e).split("\n")[0]) from e
     if blocked_by_pk:
         _notify_blocker_owner(job_pk, blocked_by_pk, actor_id)
+
+
+def force_block(job_pk: int, blocker_pk: int | None, reason: str) -> None:
+    """Used by a module's own custom gate (immigration's quota validity,
+    CIT's TCC obligations, and any future module's) to force a job blocked
+    on a condition the generic job_status_guard trigger can't express —
+    directly, bypassing the trigger's own blocked_by resolution, which only
+    understands "blocker is done/closed." Pair with force_unblock; the
+    caller is responsible for setting job_extension.attributes['active_gate']
+    so _resync_stale_blocked() leaves this block alone until the gate itself
+    clears it."""
+    execute(
+        "UPDATE job SET blocked_by = %s, status = 'blocked', status_reason = %s WHERE id = %s",
+        (blocker_pk, reason, job_pk),
+    )
+
+
+def force_unblock(job_pk: int) -> None:
+    """The other half of force_block — resumes the job once the module's own
+    gate has cleared. Matches the generic _unblock_dependents/
+    _resync_stale_blocked convention of always resuming to in_progress."""
+    execute(
+        "UPDATE job SET blocked_by = NULL, status = %s, status_reason = NULL WHERE id = %s",
+        (STATUS_IN_PROGRESS, job_pk),
+    )
 
 
 def update_job_fields(job_pk: int, **fields) -> None:
@@ -1005,6 +1030,93 @@ def assign_module_specialist(category: str, staff_id: int) -> None:
 
 def unassign_module_specialist(category: str, staff_id: int) -> None:
     execute("DELETE FROM module_specialist WHERE category = %s AND staff_id = %s", (category, staff_id))
+
+
+# ---------------------------------------------------------------------------
+# Recurring jobs — generic across every module: a service_catalogue row can
+# carry a recurring_frequency ('monthly' / 'yearly'). CIT is the first
+# module with recurring obligations (VAT returns, Annual Return); the
+# mechanism itself has no CIT-specific knowledge, so State's own recurring
+# filings reuse it unchanged once their catalogue rows set the same flag.
+# ---------------------------------------------------------------------------
+def is_recurring_service(service_code: str) -> str | None:
+    row = query_one("SELECT recurring_frequency FROM service_catalogue WHERE code = %s", (service_code,))
+    return row["recurring_frequency"] if row else None
+
+
+def _add_months(d: date, months: int) -> date:
+    import calendar
+
+    month_index = d.month - 1 + months
+    year = d.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def create_next_cycle_job(completed_job_pk: int, actor_id: int | None = None) -> dict | None:
+    """If this job's service recurs on a schedule, spawn the next cycle's
+    job automatically the moment this one is marked done — so a recurring
+    obligation (this month's VAT return, this year's Annual Return) is
+    never left to memory. Idempotent per completed job: calling this twice
+    for the same job never creates two next-cycle jobs."""
+    job = get_job(completed_job_pk)
+    if not job or not job["service_type"]:
+        return None
+    frequency = is_recurring_service(job["service_type"])
+    if not frequency:
+        return None
+
+    attrs = get_job_extension(job["id"])
+    if attrs.get("next_cycle_job_id"):
+        return None
+
+    base = job["sla_date"] or date.today()
+    next_due = _add_months(base, 1 if frequency == "monthly" else 12)
+
+    carried_attrs = {
+        k: v for k, v in attrs.items()
+        if k not in ("next_cycle_job_id", "previous_cycle_job_id", "active_gate", "desk_exam_job_id")
+    }
+    next_job = create_job(
+        client_id=job["client_id"], category=job["category"], service_type=job["service_type"],
+        title=job["title"], description=job["description"], owner_id=job["owner_id"],
+        source=job["source"], created_by=actor_id or job["created_by"], sla_date=next_due,
+        attributes=carried_attrs,
+    )
+
+    next_attrs = get_job_extension(next_job["id"])
+    next_attrs["previous_cycle_job_id"] = job["id"]
+    set_job_extension(next_job["id"], next_attrs)
+
+    attrs["next_cycle_job_id"] = next_job["id"]
+    set_job_extension(job["id"], attrs)
+
+    if next_job["owner_id"]:
+        create_notification(
+            next_job["owner_id"], "recurring_job_created", "job", next_job["id"],
+            f"{next_job['job_id']} auto-created — next {frequency} cycle for "
+            f"{next_job['client_name'] or '—'} (due {next_due.isoformat()})",
+        )
+    return next_job
+
+
+def list_recurring_jobs(category: str | None = None) -> list:
+    """Every not-yet-finished job whose service recurs on a schedule,
+    ordered by due date — powers each module's 'upcoming recurring
+    obligations' panel so a cycle is never simply forgotten."""
+    recurring_codes = {
+        r["code"] for r in query("SELECT code FROM service_catalogue WHERE recurring_frequency IS NOT NULL")
+    }
+    if not recurring_codes:
+        return []
+    jobs = list_jobs(category=category, exclude_dismissed=True)
+    out = [
+        j for j in jobs
+        if j["service_type"] in recurring_codes and j["status"] not in (STATUS_DONE, STATUS_CLOSED)
+    ]
+    out.sort(key=lambda j: j["sla_date"] or date.max)
+    return out
 
 
 # ---------------------------------------------------------------------------
