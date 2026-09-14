@@ -176,10 +176,17 @@ direct database access needed. A **Users** page (visible only to
   "won't be shown again" warning; only the bcrypt hash is ever written to
   the database, exactly like every other staff password.
 - **See and manage every user** — name, role, speciality, active/inactive,
-  with a Deactivate/Reactivate toggle. Deactivating never deletes the row:
-  `verify_login()` already refuses inactive accounts, so it's an instant,
-  reversible access cut — their past jobs, comments and invoices keep
-  their name attached exactly as before.
+  with Deactivate/Reactivate and **Reset password** per row. Deactivating
+  never deletes the row: `verify_login()` already refuses inactive
+  accounts, so it's an instant, reversible access cut — their past jobs,
+  comments and invoices keep their name attached exactly as before.
+  Reset password issues a brand-new generated password on the spot (same
+  one-time `st.code` display as creation; the username is unchanged) —
+  this is deliberately *not* a persistent register of every password ever
+  issued. Passwords are hashed one-way (bcrypt) specifically so they can
+  never be recovered later, by anyone, including the app itself; "I need
+  to hand out working credentials again" is answered by issuing a fresh
+  password, not by keeping old ones readable somewhere.
 - A user created this way can log in immediately with the generated
   username/password, straight into their correct role (and, for a
   specialist, their speciality) view — same `verify_login()` path every

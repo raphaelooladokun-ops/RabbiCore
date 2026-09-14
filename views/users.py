@@ -1,8 +1,14 @@
 """Super-admin-only staff account management: create a real login for a new
 member of staff (with a generated username/password shown once, ready to
-copy and hand over), and deactivate/reactivate existing ones. Never a hard
-delete — a deactivated account's jobs, comments and invoices stay exactly
-where they are, attributed to them."""
+copy and hand over), reset an existing user's password on demand, and
+deactivate/reactivate accounts. Never a hard delete — a deactivated
+account's jobs, comments and invoices stay exactly where they are,
+attributed to them.
+
+Passwords are never stored anywhere they could be shown again later —
+bcrypt hashing is one-way by design. "I need working credentials for this
+person again" is answered by resetting (a fresh password, shown once, same
+as creation), not by keeping a retrievable register of old ones."""
 
 from __future__ import annotations
 
@@ -31,7 +37,13 @@ def _credentials_banner() -> None:
     if not creds:
         return
     with st.container(border=True):
-        st.success(f"**{creds['name']}**'s login is ready — copy these now, they won't be shown again.")
+        if creds.get("kind") == "reset":
+            st.success(
+                f"**{creds['name']}**'s password has been reset — copy the new one now, it won't be shown again. "
+                "Their old password no longer works."
+            )
+        else:
+            st.success(f"**{creds['name']}**'s login is ready — copy these now, they won't be shown again.")
         c1, c2 = st.columns(2)
         with c1:
             st.caption("Username")
@@ -75,6 +87,7 @@ def _create_user_form() -> None:
             models.assign_module_specialist(speciality, result["staff"]["id"])
 
         st.session_state[_CREDENTIALS_KEY] = {
+            "kind": "created",
             "name": result["staff"]["name"],
             "username": result["username"],
             "password": result["password"],
@@ -82,16 +95,20 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [2.2, 1.3, 1.6, 1.0, 1.2]
+_ROW_WIDTHS = [2.0, 1.1, 1.4, 0.9, 1.2, 1.3]
 
 
 def _users_list() -> None:
     st.markdown("#### All users")
+    st.caption(
+        "Lost or need to hand out a password again? Use **Reset password** — it issues a fresh one "
+        "on the spot; the old one is never stored anywhere it could be looked up later."
+    )
     staff = [s for s in models.list_staff(active_only=False) if s["role"] != "client"]
     categories_by_staff = models.list_staff_categories()
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", ""]):
+    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", "", ""]):
         col.markdown(f"**{label}**")
 
     for s in staff:
@@ -104,6 +121,7 @@ def _users_list() -> None:
 
         if s["role"] == ROLE_SUPER_ADMIN:
             cols[4].caption("—")
+            cols[5].caption("—")
             continue
 
         if s["active"]:
@@ -116,3 +134,13 @@ def _users_list() -> None:
                 models.set_staff_active(s["id"], True)
                 st.toast(f"{s['name']} reactivated.", icon="✅")
                 st.rerun()
+
+        if cols[5].button("Reset password", key=f"reset_{s['id']}"):
+            result = models.reset_staff_password(s["id"])
+            st.session_state[_CREDENTIALS_KEY] = {
+                "kind": "reset",
+                "name": result["staff"]["name"],
+                "username": result["staff"]["email"],
+                "password": result["password"],
+            }
+            st.rerun()

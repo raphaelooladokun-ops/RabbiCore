@@ -137,6 +137,17 @@ def set_staff_active(staff_id: int, active: bool) -> None:
     execute("UPDATE staff SET active = %s WHERE id = %s", (active, staff_id))
 
 
+def reset_staff_password(staff_id: int) -> dict:
+    """Super-admin-only: issue a brand-new generated password for an
+    existing user (their username/email is unchanged) — the answer to
+    'I need to hand out working credentials again' without ever storing a
+    recoverable password. The old password stops working immediately;
+    only the new bcrypt hash is stored, same as at account creation."""
+    password = generate_password()
+    execute("UPDATE staff SET password_hash = %s WHERE id = %s", (hash_password(password), staff_id))
+    return {"staff": get_staff(staff_id), "password": password}
+
+
 def list_staff_categories() -> dict:
     """staff_id -> the list of module categories they're assigned to
     (module_specialist), across every module — used to show a specialist's
