@@ -49,6 +49,15 @@ def short_job_id(job_id: str | None) -> str:
     return f"#{job_id[-4:]}"
 
 
+def staff_label(s: dict) -> str:
+    """A staff member's display label, unique even when two people share a
+    name — every staff picker in the app (Capture's Owner field, module
+    specialist assignment, bulk-assign, reassign, the Users list) keys off
+    this rather than the bare name, so a duplicate name can never silently
+    collide with or shadow another person's entry in a dropdown."""
+    return f"{s['name']} (#{s['id']})"
+
+
 def risk_legend() -> None:
     """A small colour key so red/amber/green/grey mean the same thing
     everywhere they're used — placed wherever those badges/dots appear."""

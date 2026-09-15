@@ -90,7 +90,7 @@ def _specialist_assignment() -> None:
     if assigned:
         for a in assigned:
             c1, c2 = st.columns([3, 1])
-            c1.write(a["staff_name"])
+            c1.write(ui.staff_label({"name": a["staff_name"], "id": a["staff_id"]}))
             if c2.button("Remove", key=f"rmspec_{a['id']}"):
                 models.unassign_module_specialist("immigration", a["staff_id"])
                 st.rerun()
@@ -102,7 +102,7 @@ def _specialist_assignment() -> None:
         if s["role"] == "specialist" and s["id"] not in assigned_ids
     ]
     if candidates:
-        staff_map = {s["name"]: s for s in candidates}
+        staff_map = {ui.staff_label(s): s for s in candidates}
         col1, col2 = st.columns([3, 1])
         choice = col1.selectbox(
             "Add specialist", options=list(staff_map.keys()), index=None,

@@ -519,10 +519,9 @@ def _reassign_owner_control(job: dict, key_prefix: str, user: dict) -> None:
         return
     with st.expander("Reassign owner"):
         staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
-        options = [s["name"] for s in staff]
-        staff_by_name = {s["name"]: s["id"] for s in staff}
-        current = job["owner_name"]
-        index = options.index(current) if current in options else None
+        options = [ui.staff_label(s) for s in staff]
+        staff_by_name = {ui.staff_label(s): s["id"] for s in staff}
+        index = next((i for i, s in enumerate(staff) if s["id"] == job["owner_id"]), None)
         choice = st.selectbox(
             "Owner", options=options, index=index, placeholder="Select owner…",
             key=f"{key_prefix}_reassign",

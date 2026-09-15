@@ -176,6 +176,38 @@ def delete_staff(staff_id: int) -> None:
     execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
 
+def find_active_staff_by_name(name: str):
+    """Exact, case-insensitive match against active staff — used at
+    creation time to warn about a likely duplicate before a second
+    identical-looking account gets made."""
+    return query_one("SELECT * FROM staff WHERE lower(name) = lower(%s) AND active = TRUE", (name,))
+
+
+def merge_staff(source_id: int, target_id: int) -> None:
+    """Super-admin-only: fold a duplicate account into another — every
+    job, invoice, expense, comment and specialist assignment attributed
+    to `source` moves to `target`, then `source` is deleted. This is how
+    the two identical-looking staff rows from before duplicate-prevention
+    existed actually get resolved, since a plain delete refuses any
+    account with history and a real person usually has some by now."""
+    if source_id == target_id:
+        raise StaffDeleteError("Can't merge a user into themselves.")
+    for col in ("owner_id", "created_by", "hidden_by", "start_override_by"):
+        execute(f"UPDATE job SET {col} = %s WHERE {col} = %s", (target_id, source_id))
+    for col in ("created_by", "approved_by", "rejected_by", "sent_by"):
+        execute(f"UPDATE invoice SET {col} = %s WHERE {col} = %s", (target_id, source_id))
+    execute("UPDATE job_expense SET created_by = %s WHERE created_by = %s", (target_id, source_id))
+    execute("UPDATE job_comment SET author_id = %s WHERE author_id = %s", (target_id, source_id))
+    execute(
+        "UPDATE module_specialist SET staff_id = %s WHERE staff_id = %s "
+        "AND category NOT IN (SELECT category FROM module_specialist WHERE staff_id = %s)",
+        (target_id, source_id, target_id),
+    )
+    execute("DELETE FROM module_specialist WHERE staff_id = %s", (source_id,))
+    execute("DELETE FROM notification WHERE staff_id = %s", (source_id,))
+    execute("DELETE FROM staff WHERE id = %s", (source_id,))
+
+
 def reset_staff_password(staff_id: int) -> dict:
     """Super-admin-only: issue a brand-new generated password for an
     existing user (their username/email is unchanged) — the answer to

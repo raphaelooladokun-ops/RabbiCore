@@ -188,8 +188,8 @@ def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
 
     st.write("")
     staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
-    staff_options = ["— choose owner —"] + [s["name"] for s in staff]
-    staff_by_name = {s["name"]: s["id"] for s in staff}
+    staff_options = ["— choose owner —"] + [ui.staff_label(s) for s in staff]
+    staff_by_name = {ui.staff_label(s): s["id"] for s in staff}
 
     a1, a2 = st.columns([2, 1])
     with a1:

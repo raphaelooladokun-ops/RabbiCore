@@ -97,7 +97,7 @@ def _job_form(user: dict) -> None:
             rest = [s for s in staff if s["id"] not in assigned_ids]
             ordered_staff = preferred + rest
             default_owner_index = 0
-    staff_map = {s["name"]: s for s in ordered_staff}
+    staff_map = {ui.staff_label(s): s for s in ordered_staff}
 
     col3, col4 = st.columns(2)
     with col3:

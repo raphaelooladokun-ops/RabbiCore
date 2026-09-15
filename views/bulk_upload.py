@@ -75,7 +75,7 @@ def _render_preview(preview: list, user: dict) -> None:
     service_options = {"— no match, choose manually —": None}
     service_options.update({f"{s['name']} ({s['pillar']})": s["code"] for s in services})
     owner_options = {"— unassigned —": None}
-    owner_options.update({s["name"]: s["id"] for s in staff})
+    owner_options.update({ui.staff_label(s): s["id"] for s in staff})
 
     new_client_names = {
         r["raw"][bulk_import.COL_CLIENT] for r in preview if r["will_create_client"]
