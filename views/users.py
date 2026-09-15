@@ -95,7 +95,7 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [1.8, 1.0, 1.3, 0.8, 1.5, 1.1, 1.2]
+_ROW_WIDTHS = [1.6, 0.9, 1.2, 0.7, 1.3, 1.0, 1.1, 0.9]
 
 
 def _users_list() -> None:
@@ -108,7 +108,7 @@ def _users_list() -> None:
     categories_by_staff = models.list_staff_categories()
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", "Created", "", ""]):
+    for col, label in zip(header, ["Name", "Role", "Speciality", "Status", "Created", "", "", ""]):
         col.markdown(f"**{label}**")
 
     for s in staff:
@@ -123,6 +123,7 @@ def _users_list() -> None:
         if s["role"] == ROLE_SUPER_ADMIN:
             cols[5].caption("—")
             cols[6].caption("—")
+            cols[7].caption("—")
             continue
 
         if s["active"]:
@@ -145,3 +146,28 @@ def _users_list() -> None:
                 "password": result["password"],
             }
             st.rerun()
+
+        confirm_key = f"confirm_del_{s['id']}"
+        if cols[7].button("Delete", key=f"del_{s['id']}"):
+            st.session_state[confirm_key] = True
+            st.rerun()
+
+        if st.session_state.get(confirm_key):
+            with st.container(border=True):
+                st.warning(
+                    f"Permanently delete **{s['name']}**? This is the harder, permanent action — "
+                    "it cannot be undone. Deactivate instead to keep the record but block their login."
+                )
+                c1, c2 = st.columns(2)
+                if c1.button("Yes, delete permanently", key=f"confirmdel_{s['id']}", type="primary"):
+                    try:
+                        models.delete_staff(s["id"])
+                    except models.StaffDeleteError as e:
+                        st.error(str(e))
+                    else:
+                        st.session_state.pop(confirm_key, None)
+                        st.toast(f"{s['name']} permanently deleted.", icon="✅")
+                        st.rerun()
+                if c2.button("Cancel", key=f"canceldel_{s['id']}"):
+                    st.session_state.pop(confirm_key, None)
+                    st.rerun()

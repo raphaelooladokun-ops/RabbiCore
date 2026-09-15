@@ -59,16 +59,32 @@ def render(user: dict, job_pk: int) -> None:
 
     key_prefix = f"jd_{job['id']}"
 
+    # The start-job gate: until a specialist explicitly starts their own New
+    # job, ticking documents, commenting and changing status all stay locked
+    # — "Start job" below is the only unlocked action. This is a restriction
+    # on the specialist's own workflow, not a business rule, so no other
+    # role (super_admin included) is ever subject to it.
+    gate_active = (
+        user["role"] == ROLE_SPECIALIST
+        and job["owner_id"] == user["id"]
+        and job["status"] == STATUS_NEW
+    )
+
     _header(job)
     st.write("")
+
+    if gate_active:
+        _start_job_gate(job, key_prefix, user)
+        st.divider()
+
     _blocking_alert(job)
     _info(job)
     if job["category"] == "immigration":
         st.divider()
-        _immigration_section(job, user)
+        _immigration_section(job, user, gate_active=gate_active)
     elif job["category"] == "cit":
         st.divider()
-        _cit_section(job, user)
+        _cit_section(job, user, gate_active=gate_active)
     st.divider()
 
     editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
@@ -76,7 +92,13 @@ def render(user: dict, job_pk: int) -> None:
     )
 
     if editable and job["status"] not in (STATUS_CLOSED, STATUS_DISMISSED):
-        _status_actions(job, key_prefix, user)
+        if not gate_active:
+            # The gate's own "Start job" control above already covers this
+            # exact New-status action — showing it again here would just
+            # duplicate it.
+            _status_actions(job, key_prefix, user)
+            st.divider()
+        _reassign_owner_control(job, key_prefix, user)
         st.divider()
         _dependency_control(job, key_prefix, user["id"])
         st.divider()
@@ -101,7 +123,7 @@ def render(user: dict, job_pk: int) -> None:
         _expenses(job, user)
         st.divider()
 
-    _comments(job, user)
+    _comments(job, user, locked=gate_active)
 
     if user["role"] == ROLE_SUPER_ADMIN:
         st.divider()
@@ -160,13 +182,18 @@ def _info(job: dict) -> None:
         st.caption(f"Internal notes: {job['internal_notes']}")
 
 
-def _document_checklist_section(job: dict, user: dict, *, on_expiry_change=None) -> bool:
+def _document_checklist_section(
+    job: dict, user: dict, *, on_expiry_change=None, gate_locked: bool = False,
+) -> bool:
     """Generic across every module: the checklist + readiness badge, ticked
     off document by document. `on_expiry_change`, if given, is called after
     an expiry date is edited — the one module-specific follow-up (e.g.
-    immigration's quota-gate re-check) a checklist edit can trigger. Returns
-    whether this job's owner is allowed to edit it, so callers can reuse the
-    same editable check for their own module-specific controls below it."""
+    immigration's quota-gate re-check) a checklist edit can trigger.
+    `gate_locked` is the specialist start-job gate — while active it turns
+    off editing for the specialist owner only; every other role keeps its
+    usual access. Returns whether this job's owner is allowed to edit it,
+    so callers can reuse the same editable check for their own
+    module-specific controls below it."""
     docs = models.list_job_documents(job["id"])
     received, required = models.job_document_readiness(job["id"])
     if required == 0:
@@ -183,8 +210,10 @@ def _document_checklist_section(job: dict, user: dict, *, on_expiry_change=None)
         st.write("")
 
     editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
-        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
+        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and not gate_locked
     )
+    if gate_locked and user["role"] == ROLE_SPECIALIST and docs:
+        st.caption("🔒 Locked until you start this job.")
 
     for d in docs:
         cols = st.columns([0.4, 2.4, 1.3, 1.1])
@@ -214,10 +243,11 @@ def _document_checklist_section(job: dict, user: dict, *, on_expiry_change=None)
     return editable
 
 
-def _immigration_section(job: dict, user: dict) -> None:
+def _immigration_section(job: dict, user: dict, *, gate_active: bool = False) -> None:
     st.markdown("#### Immigration checklist")
     editable = _document_checklist_section(
         job, user, on_expiry_change=lambda: immigration.sync_quota_cerpac_gate(actor_id=user["id"]),
+        gate_locked=gate_active,
     )
 
     if job["service_type"] == immigration.CERPAC_PRINCIPAL_SERVICE_CODE:
@@ -267,9 +297,9 @@ def _quota_link_control(job: dict, user: dict, editable: bool) -> None:
             st.rerun()
 
 
-def _cit_section(job: dict, user: dict) -> None:
+def _cit_section(job: dict, user: dict, *, gate_active: bool = False) -> None:
     st.markdown("#### CIT checklist")
-    _document_checklist_section(job, user)
+    _document_checklist_section(job, user, gate_locked=gate_active)
 
     frequency = models.is_recurring_service(job["service_type"]) if job["service_type"] else None
     if frequency:
@@ -342,6 +372,26 @@ def _tcc_obligations_panel(job: dict) -> None:
                     ui.go_to_job(o["id"])
         else:
             st.success("✅ No other outstanding CIT obligations for this client.")
+
+
+def _start_job_gate(job: dict, key_prefix: str, user: dict) -> None:
+    """The specialist start-job gate, rendered at the very top of the page
+    so it's the first and only thing they can act on before starting:
+    ticking documents, posting comments and every other status action stay
+    locked (see _document_checklist_section/_comments's gate_locked/locked
+    params) until this succeeds. Reuses the same invoice-before-work check
+    as the normal Start-work action — a specialist still can't jump that
+    queue, they just see the gate framed as "start this job" rather than
+    buried under the checklist."""
+    st.markdown("#### Start job")
+    can_start, block_reason = models.can_start_work(job)
+    if can_start:
+        st.info("Documents, comments and status stay locked until you start this job.")
+        if st.button("Start job", key=f"{key_prefix}_gate_start", type="primary"):
+            _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=user["id"])
+    else:
+        st.warning(f"Can't start yet — {block_reason}")
+        st.caption("Documents, comments and status stay locked until this job is started.")
 
 
 def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
@@ -439,6 +489,31 @@ def _apply_status(job_pk: int, new_status: str, reason: str | None = None, actor
 
     st.toast("Status updated.", icon="✅")
     st.rerun()
+
+
+def _reassign_owner_control(job: dict, key_prefix: str, user: dict) -> None:
+    """admin/super_admin only: change who owns this job after creation.
+    Shares models.reassign_owner with the register's bulk-assign action —
+    the same primitive, just applied to one job at a time here."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+        return
+    with st.expander("Reassign owner"):
+        staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
+        options = [s["name"] for s in staff]
+        staff_by_name = {s["name"]: s["id"] for s in staff}
+        current = job["owner_name"]
+        index = options.index(current) if current in options else None
+        choice = st.selectbox(
+            "Owner", options=options, index=index, placeholder="Select owner…",
+            key=f"{key_prefix}_reassign",
+        )
+        if st.button("Save owner", key=f"{key_prefix}_savereassign"):
+            if not choice:
+                st.error("Select an owner.")
+            else:
+                changed = models.reassign_owner(job["id"], staff_by_name[choice], actor_id=user["id"])
+                st.toast(f"Reassigned to {choice}." if changed else "Already owned by this person.", icon="✅")
+                st.rerun()
 
 
 def _dependency_control(job: dict, key_prefix: str, actor_id: int) -> None:
@@ -586,18 +661,21 @@ def _expenses(job: dict, user: dict) -> None:
                     st.rerun()
 
 
-def _comments(job: dict, user: dict) -> None:
+def _comments(job: dict, user: dict, *, locked: bool = False) -> None:
     st.markdown("#### Comments")
-    with st.form(key=f"comment_form_{job['id']}", clear_on_submit=True):
-        body = st.text_area(
-            "Add a comment", label_visibility="collapsed", placeholder="Add a comment…",
-            key=f"comment_body_{job['id']}",
-        )
-        if st.form_submit_button("Post comment"):
-            if body.strip():
-                models.add_job_comment(job["id"], user["id"], body.strip())
-                st.toast("Comment posted.", icon="✅")
-                st.rerun()
+    if locked:
+        st.caption("🔒 Locked until you start this job.")
+    else:
+        with st.form(key=f"comment_form_{job['id']}", clear_on_submit=True):
+            body = st.text_area(
+                "Add a comment", label_visibility="collapsed", placeholder="Add a comment…",
+                key=f"comment_body_{job['id']}",
+            )
+            if st.form_submit_button("Post comment"):
+                if body.strip():
+                    models.add_job_comment(job["id"], user["id"], body.strip())
+                    st.toast("Comment posted.", icon="✅")
+                    st.rerun()
 
     comments = models.list_job_comments(job["id"])
     if not comments:

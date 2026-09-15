@@ -143,6 +143,39 @@ def set_staff_active(staff_id: int, active: bool) -> None:
     execute("UPDATE staff SET active = %s WHERE id = %s", (active, staff_id))
 
 
+class StaffDeleteError(Exception):
+    pass
+
+
+def delete_staff(staff_id: int) -> None:
+    """Super-admin-only real delete — permanent, unlike deactivate. Refuses
+    if this person has any history attached (owned or created jobs, an
+    invoice touch, a logged expense, a posted comment): that's real audit
+    trail, not something a cleanup action should silently erase — mirrors
+    delete_job's own invoice-history guard. Deactivate instead for anyone
+    who's actually done work; delete is for a mistakenly-created account
+    with nothing on it yet."""
+    row = query_one(
+        """
+        SELECT (
+            EXISTS(SELECT 1 FROM job WHERE owner_id = %s OR created_by = %s
+                                        OR hidden_by = %s OR start_override_by = %s)
+            OR EXISTS(SELECT 1 FROM invoice WHERE created_by = %s OR approved_by = %s
+                                              OR rejected_by = %s OR sent_by = %s)
+            OR EXISTS(SELECT 1 FROM job_expense WHERE created_by = %s)
+            OR EXISTS(SELECT 1 FROM job_comment WHERE author_id = %s)
+        ) AS has_history
+        """,
+        (staff_id,) * 10,
+    )
+    if row and row["has_history"]:
+        raise StaffDeleteError(
+            "This user has jobs, invoices, expenses or comments on file and can't be permanently "
+            "deleted — deactivate instead to keep the record but block their login."
+        )
+    execute("DELETE FROM staff WHERE id = %s", (staff_id,))
+
+
 def reset_staff_password(staff_id: int) -> dict:
     """Super-admin-only: issue a brand-new generated password for an
     existing user (their username/email is unchanged) — the answer to
