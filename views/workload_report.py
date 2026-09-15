@@ -52,6 +52,11 @@ def render(user: dict) -> None:
         cols = st.columns([3, 1.3, 1.6])
         cols[0].write(r["staff_name"])
         cols[1].write(f"#{r['staff_id']}")
-        cols[2].write(r["job_count"])
+        with cols[2].popover(str(r["job_count"]), key=f"wl_pop_{r['staff_id']}"):
+            st.markdown(f"**{r['staff_name']} — jobs in this range**")
+            for j in models.workload_report_jobs(r["staff_id"], date_from, date_to):
+                label = f"{j['job_id']} — {j['client_name'] or '—'} — {j['title']}"
+                if st.button(label, key=f"wl_job_{r['staff_id']}_{j['id']}", type="tertiary", use_container_width=True):
+                    ui.go_to_job(j["id"])
 
     st.caption(f"{len(rows)} specialist(s) with activity in this range.")

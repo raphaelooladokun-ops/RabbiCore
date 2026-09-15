@@ -1218,6 +1218,20 @@ def workload_report(date_from: date, date_to: date) -> list:
     return rows
 
 
+def workload_report_jobs(staff_id: int, date_from: date, date_to: date) -> list:
+    """The actual jobs behind one specialist's workload_report count —
+    powers the "click the number" detail popup so the EC gets an overview
+    of what was actually worked on, not just a bare count."""
+    return query(
+        _JOB_SELECT + """
+        AND j.owner_id = %s
+        AND ((j.started_at::date BETWEEN %s AND %s) OR (j.completed_at::date BETWEEN %s AND %s))
+        ORDER BY COALESCE(j.completed_at, j.started_at) DESC
+        """,
+        (staff_id, date_from, date_to, date_from, date_to),
+    )
+
+
 def format_duration(start, end) -> str:
     """Human-readable elapsed time between two datetimes, coarsest-unit-
     first ("2 weeks 1 day", "3 days", "5 hours", "12 minutes") — exactly
