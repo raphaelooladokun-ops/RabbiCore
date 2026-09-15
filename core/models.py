@@ -849,6 +849,53 @@ def mark_invoice_paid(invoice_id: int, payment_reference: str, payment_date: dat
     )
 
 
+class InvoiceApprovalError(Exception):
+    pass
+
+
+def unapprove_invoice(invoice_id: int, actor_id: int, reason: str) -> None:
+    """EC (principal)/super_admin only: remove an already-granted approval,
+    sending the invoice back to pending_approval. A reason is always
+    required and every un-approval is logged (who, when, why) — this is a
+    records-integrity action, never a silent status flip. If the invoice
+    had already moved on to sent/paid, those steps are no longer valid
+    once approval itself is revoked, so they're cleared too; the caller
+    (the UI) is responsible for warning loudly and getting explicit
+    confirmation before calling this in that case."""
+    if not reason or not reason.strip():
+        raise InvoiceApprovalError("A reason is required to remove an invoice's approval.")
+    invoice = get_invoice(invoice_id)
+    if not invoice:
+        raise InvoiceApprovalError("Invoice not found.")
+    if invoice["status"] not in ("approved", "paid"):
+        raise InvoiceApprovalError("This invoice isn't currently approved.")
+
+    execute(
+        "UPDATE invoice SET status = 'pending_approval', approved_by = NULL, approved_at = NULL, "
+        "sent_at = NULL, sent_by = NULL, paid_at = NULL, payment_reference = NULL, payment_date = NULL "
+        "WHERE id = %s",
+        (invoice_id,),
+    )
+    execute(
+        "INSERT INTO invoice_unapproval_log (invoice_id, reason, actor_id) VALUES (%s, %s, %s)",
+        (invoice_id, reason.strip(), actor_id),
+    )
+    if invoice["created_by"] and invoice["created_by"] != actor_id:
+        create_notification(
+            invoice["created_by"], "invoice_unapproved", "invoice", invoice_id,
+            f"Invoice {invoice['invoice_code']} approval removed — {reason.strip()}",
+        )
+
+
+def list_invoice_unapprovals(invoice_id: int) -> list:
+    return query(
+        "SELECT u.*, s.name AS actor_name FROM invoice_unapproval_log u "
+        "LEFT JOIN staff s ON s.id = u.actor_id "
+        "WHERE u.invoice_id = %s ORDER BY u.created_at DESC",
+        (invoice_id,),
+    )
+
+
 def get_invoice(invoice_id: int):
     return query_one(_INVOICE_SELECT + " WHERE i.id = %s", (invoice_id,))
 

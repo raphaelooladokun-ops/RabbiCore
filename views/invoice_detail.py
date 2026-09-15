@@ -61,6 +61,7 @@ def render(user: dict, invoice_pk: int) -> None:
         _read_only_lines(lines, total)
 
     _lifecycle_actions(user, invoice, lines, total)
+    _remove_approval_control(invoice, user)
     _edit_invoice_code_control(invoice, user)
 
 
@@ -107,6 +108,62 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
     if invoice["status"] == "paid":
         paid_on = invoice["payment_date"].isoformat() if invoice.get("payment_date") else "—"
         st.caption(f"Paid — ref {invoice.get('payment_reference') or '—'}, {paid_on}.")
+
+
+def _remove_approval_control(invoice: dict, user: dict) -> None:
+    """EC (principal)/super_admin only: undo an already-granted approval,
+    sending the invoice back to pending_approval. Always requires a
+    reason (enforced in models.unapprove_invoice) and is logged. If the
+    invoice has already moved on to sent/paid, removing approval clears
+    that record too — loudly warned here and gated behind an explicit
+    confirmation, never a single click, since this is a records-integrity
+    action."""
+    if user["role"] not in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        return
+
+    history = models.list_invoice_unapprovals(invoice["id"])
+    can_remove = invoice["status"] in ("approved", "paid")
+    if not can_remove and not history:
+        return  # nothing to act on and nothing to show
+
+    st.write("")
+    with st.expander("Remove approval" if can_remove else "Approval history"):
+        if can_remove:
+            risky = invoice["status"] == "paid" or bool(invoice.get("sent_at"))
+            if risky:
+                state_desc = "marked **paid**" if invoice["status"] == "paid" else "already **sent to the client**"
+                st.warning(
+                    f"⚠️ This invoice has been {state_desc}. Removing approval resets it to pending "
+                    "approval and clears its sent/paid record — this affects records integrity. "
+                    "Confirm this is really what you want to do."
+                )
+            reason = st.text_area("Reason for removing approval *", key="inv_unapprove_reason")
+            confirm = True
+            if risky:
+                confirm = st.checkbox(
+                    "Yes, I understand this clears the sent/paid record — this cannot be undone automatically",
+                    key="inv_unapprove_confirm",
+                )
+            if st.button("Remove approval", key="inv_unapprove_btn", disabled=risky and not confirm):
+                try:
+                    models.unapprove_invoice(invoice["id"], user["id"], reason)
+                except models.InvoiceApprovalError as e:
+                    st.error(str(e))
+                else:
+                    st.toast("Approval removed — invoice is back to pending approval.", icon="✅")
+                    st.rerun()
+        else:
+            st.caption("This invoice isn't currently approved, so there's nothing to remove.")
+
+        # Shown regardless of the invoice's current state — once an
+        # approval has been pulled, that history stays visible even after
+        # the invoice moves on (e.g. gets re-approved later).
+        if history:
+            st.caption("Un-approval history:")
+            for h in history:
+                st.caption(
+                    f"{h['actor_name'] or '—'}, {h['created_at'].strftime('%d %b %Y, %H:%M')} — {h['reason']}"
+                )
 
 
 def _edit_invoice_code_control(invoice: dict, user: dict) -> None:

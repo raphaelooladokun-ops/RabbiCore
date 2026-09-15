@@ -109,6 +109,23 @@ ALTER TABLE invoice ADD CONSTRAINT invoice_status_check
 ALTER TABLE invoice ALTER COLUMN status SET DEFAULT 'pending_approval';
 
 -- ---------------------------------------------------------------------------
+-- INVOICE UNAPPROVAL LOG — EC/super_admin removing an already-granted
+-- approval (sends the invoice back to pending_approval). Kept as its own
+-- log rather than overloading rejection_reason/rejected_by, which is a
+-- distinct admin<->principal workflow step, not this one; a reason is
+-- always required so this action is never silent.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS invoice_unapproval_log (
+    id              SERIAL PRIMARY KEY,
+    invoice_id      INTEGER NOT NULL REFERENCES invoice(id) ON DELETE CASCADE,
+    reason          TEXT NOT NULL,
+    actor_id        INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_unapproval_log_invoice ON invoice_unapproval_log(invoice_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- JOB — the central object of the whole suite
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS job (
