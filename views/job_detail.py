@@ -4,7 +4,7 @@ job IS how you update it, there's no separate "go to update page" step."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import streamlit as st
 
@@ -70,7 +70,7 @@ def render(user: dict, job_pk: int) -> None:
         and job["status"] == STATUS_NEW
     )
 
-    _header(job)
+    _header(job, user)
     st.write("")
 
     if gate_active:
@@ -130,14 +130,34 @@ def render(user: dict, job_pk: int) -> None:
         _danger_zone(job, user)
 
 
-def _header(job: dict) -> None:
+def _header(job: dict, user: dict) -> None:
     st.markdown(f'<div class="rc-page-title">{job["job_id"]}</div>', unsafe_allow_html=True)
     badges = ui.status_badge_html(job["status"]) + "&nbsp;&nbsp;" + ui.risk_badge_html(models.compute_risk(job))
+    time_badge = _time_on_job_badge_html(job, user)
+    if time_badge:
+        badges += "&nbsp;&nbsp;" + time_badge
     st.markdown(badges, unsafe_allow_html=True)
     st.markdown(
         f'<div class="rc-page-subtitle" style="margin-top:0.5rem;">{job["title"]}</div>',
         unsafe_allow_html=True,
     )
+
+
+def _time_on_job_badge_html(job: dict, user: dict) -> str | None:
+    """Compact elapsed-time badge: "On for X" while in progress, "Took X"
+    once done — both read from the same started_at/completed_at pair the
+    workload report uses. Visible to the owning specialist, admin, EC
+    (principal) and super_admin; nobody else, same as the expense log."""
+    can_see = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
+    )
+    if not can_see or not job.get("started_at"):
+        return None
+    if job.get("completed_at"):
+        label = f"Took {models.format_duration(job['started_at'], job['completed_at'])}"
+    else:
+        label = f"On for {models.format_duration(job['started_at'], datetime.now(timezone.utc))}"
+    return f'<span class="rc-badge rc-badge-grey">⏱ {label}</span>'
 
 
 def _blocking_alert(job: dict) -> None:
