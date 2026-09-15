@@ -22,6 +22,7 @@ from core.cit import sync_tcc_gate
 from core.immigration import sync_quota_cerpac_gate
 from views import (
     billing,
+    bulk_upload,
     capture,
     cit,
     hidden_jobs,
@@ -115,6 +116,7 @@ NAV = {
         ("CIT", cit.render),
         ("Billing", billing.render),
         ("Users", users.render),
+        ("Bulk Upload", bulk_upload.render),
         ("Hidden Jobs", hidden_jobs.render),
         ("My Queue", home_specialist.render),
         ("My Jobs", home_client.render),

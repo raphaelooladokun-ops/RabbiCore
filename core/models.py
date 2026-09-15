@@ -47,6 +47,12 @@ def get_client(client_id: int):
     return query_one("SELECT * FROM client WHERE id = %s", (client_id,))
 
 
+def find_client_by_name(name: str):
+    """Exact, case-insensitive match — used by bulk import to avoid creating
+    a duplicate client for a name that's already on file."""
+    return query_one("SELECT * FROM client WHERE lower(name) = lower(%s)", (name,))
+
+
 def create_client(
     name: str,
     rc_number: str | None = None,
@@ -176,28 +182,29 @@ def _temp_code(prefix: str) -> str:
 
 def create_job(
     *,
-    client_id: int,
+    client_id: int | None,
     category: str,
     service_type: str | None,
     title: str,
     description: str | None,
-    owner_id: int,
+    owner_id: int | None,
     source: str,
     created_by: int,
     sla_date: date | None,
     attributes: dict | None = None,
     waiting_on_client: str | None = None,
+    internal_notes: str | None = None,
 ) -> dict:
     row = execute_returning(
         """
         INSERT INTO job (job_id, client_id, category, service_type, title, description,
-                          owner_id, status, source, created_by, sla_date, waiting_on_client)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'new', %s, %s, %s, %s)
+                          owner_id, status, source, created_by, sla_date, waiting_on_client, internal_notes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'new', %s, %s, %s, %s, %s)
         RETURNING id, job_id
         """,
         (
             _temp_code("JOB"), client_id, category, service_type, title, description,
-            owner_id, source, created_by, sla_date, waiting_on_client,
+            owner_id, source, created_by, sla_date, waiting_on_client, internal_notes,
         ),
     )
     job_id_human = f"JOB-{date.today().year}-{row['id']:04d}"

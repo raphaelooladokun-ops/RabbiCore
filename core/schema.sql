@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS job (
 -- (dismissed items may not be tied to a client); no-op if already nullable.
 ALTER TABLE job ALTER COLUMN client_id DROP NOT NULL;
 
+-- Widening migration: a CSV-imported job (the bulk upload feature) is
+-- neither a client email nor a team-group forward — it's its own source,
+-- alongside the two organic capture sources. No-op once migrated.
+ALTER TABLE job DROP CONSTRAINT IF EXISTS job_source_check;
+ALTER TABLE job ADD CONSTRAINT job_source_check
+    CHECK (source IN ('client_email', 'team_group_forward', 'bulk_import'));
+
 -- The reason captured when a job is marked done or blocked (required by the
 -- UI for those two transitions) — holds the reason for the CURRENT status,
 -- overwritten on the next status change. Not a full history log, by design.

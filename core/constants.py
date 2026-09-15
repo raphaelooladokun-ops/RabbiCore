@@ -60,10 +60,12 @@ STATUSES_IN_ORDER = [STATUS_NEW, STATUS_IN_PROGRESS, STATUS_BLOCKED, STATUS_DONE
 # ---------------------------------------------------------------------------
 SOURCE_CLIENT_EMAIL = "client_email"
 SOURCE_TEAM_GROUP_FORWARD = "team_group_forward"
+SOURCE_BULK_IMPORT = "bulk_import"
 
 SOURCE_LABELS = {
     SOURCE_CLIENT_EMAIL: "Client email / form",
     SOURCE_TEAM_GROUP_FORWARD: "Team-group forward",
+    SOURCE_BULK_IMPORT: "Bulk import",
 }
 
 # ---------------------------------------------------------------------------
