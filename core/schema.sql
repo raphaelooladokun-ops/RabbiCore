@@ -282,6 +282,27 @@ CREATE INDEX IF NOT EXISTS idx_notification_unread ON notification(staff_id) WHE
 CREATE INDEX IF NOT EXISTS idx_notification_dedup ON notification(staff_id, kind, link_type, link_id);
 
 -- ---------------------------------------------------------------------------
+-- CODE EDIT LOG — the audit trail for manually correcting a job or invoice
+-- number (EC/admin/super_admin only). Every job_id/invoice_code is normally
+-- auto-generated and never touched again; this exists purely for the rare
+-- "this was set wrong, fix it" case, and exists so that correction itself
+-- is never silent. entity_type/entity_id mirrors notification's own
+-- link_type/link_id pattern — no single FK is possible across two target
+-- tables (job and invoice).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS code_edit_log (
+    id              SERIAL PRIMARY KEY,
+    entity_type     TEXT NOT NULL CHECK (entity_type IN ('job', 'invoice')),
+    entity_id       INTEGER NOT NULL,
+    old_code        TEXT NOT NULL,
+    new_code        TEXT NOT NULL,
+    changed_by      INTEGER REFERENCES staff(id),
+    changed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_edit_log_entity ON code_edit_log(entity_type, entity_id, changed_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- STATUS GUARD — the rules the brief says the system must enforce, kept in
 -- the database so no future module or UI can bypass them:
 --   1. A job cannot become 'closed' without an invoice, and that invoice

@@ -890,6 +890,63 @@ def close_job(job_pk: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Code corrections — EC/admin/super_admin only. job_id and invoice_code are
+# normally auto-generated once and never touched again; this is purely for
+# the rare "this was set wrong, fix it" case, logged every time so a manual
+# correction is never silent.
+# ---------------------------------------------------------------------------
+class CodeEditError(Exception):
+    pass
+
+
+def _log_code_edit(entity_type: str, entity_id: int, old_code: str, new_code: str, actor_id: int | None) -> None:
+    execute(
+        "INSERT INTO code_edit_log (entity_type, entity_id, old_code, new_code, changed_by) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (entity_type, entity_id, old_code, new_code, actor_id),
+    )
+
+
+def update_job_code(job_pk: int, new_code: str, actor_id: int | None = None) -> None:
+    new_code = new_code.strip()
+    if not new_code:
+        raise CodeEditError("Job ID can't be blank.")
+    job = get_job(job_pk)
+    if not job:
+        raise CodeEditError("Job not found.")
+    if new_code == job["job_id"]:
+        return
+    if query_one("SELECT 1 FROM job WHERE job_id = %s AND id <> %s", (new_code, job_pk)):
+        raise CodeEditError(f"Job ID '{new_code}' is already in use.")
+    execute("UPDATE job SET job_id = %s WHERE id = %s", (new_code, job_pk))
+    _log_code_edit("job", job_pk, job["job_id"], new_code, actor_id)
+
+
+def update_invoice_code(invoice_pk: int, new_code: str, actor_id: int | None = None) -> None:
+    new_code = new_code.strip()
+    if not new_code:
+        raise CodeEditError("Invoice code can't be blank.")
+    invoice = get_invoice(invoice_pk)
+    if not invoice:
+        raise CodeEditError("Invoice not found.")
+    if new_code == invoice["invoice_code"]:
+        return
+    if query_one("SELECT 1 FROM invoice WHERE invoice_code = %s AND id <> %s", (new_code, invoice_pk)):
+        raise CodeEditError(f"Invoice code '{new_code}' is already in use.")
+    execute("UPDATE invoice SET invoice_code = %s WHERE id = %s", (new_code, invoice_pk))
+    _log_code_edit("invoice", invoice_pk, invoice["invoice_code"], new_code, actor_id)
+
+
+def list_code_edits(entity_type: str, entity_id: int) -> list:
+    return query(
+        "SELECT l.*, s.name AS changed_by_name FROM code_edit_log l "
+        "LEFT JOIN staff s ON s.id = l.changed_by "
+        "WHERE l.entity_type = %s AND l.entity_id = %s ORDER BY l.changed_at DESC",
+        (entity_type, entity_id),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-job expense log — admin adds, principal can view. A running list, not
 # accounting.
 # ---------------------------------------------------------------------------

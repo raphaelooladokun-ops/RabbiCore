@@ -61,6 +61,7 @@ def render(user: dict, invoice_pk: int) -> None:
         _read_only_lines(lines, total)
 
     _lifecycle_actions(user, invoice, lines, total)
+    _edit_invoice_code_control(invoice, user)
 
 
 def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> None:
@@ -106,6 +107,36 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
     if invoice["status"] == "paid":
         paid_on = invoice["payment_date"].isoformat() if invoice.get("payment_date") else "—"
         st.caption(f"Paid — ref {invoice.get('payment_reference') or '—'}, {paid_on}.")
+
+
+def _edit_invoice_code_control(invoice: dict, user: dict) -> None:
+    """EC (principal)/admin/super_admin only: correct or manually set this
+    invoice's number. invoice_code is normally auto-generated and never
+    touched again — this exists for the rare "this was set wrong" case,
+    and every change is logged (who, when, old -> new) so a correction is
+    never silent."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        return
+    st.write("")
+    with st.expander("Edit invoice number"):
+        new_code = st.text_input("Invoice code", value=invoice["invoice_code"], key="inv_editcode")
+        if st.button("Save invoice number", key="inv_savecode"):
+            try:
+                models.update_invoice_code(invoice["id"], new_code, actor_id=user["id"])
+            except models.CodeEditError as e:
+                st.error(str(e))
+            else:
+                st.toast("Invoice number updated.", icon="✅")
+                st.rerun()
+
+        edits = models.list_code_edits("invoice", invoice["id"])
+        if edits:
+            st.caption("Edit history:")
+            for e in edits:
+                st.caption(
+                    f"{e['old_code']} → {e['new_code']} — {e['changed_by_name'] or '—'}, "
+                    f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
+                )
 
 
 def _document_header(invoice: dict, total: float) -> None:

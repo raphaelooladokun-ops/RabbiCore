@@ -100,6 +100,8 @@ def render(user: dict, job_pk: int) -> None:
             st.divider()
         _reassign_owner_control(job, key_prefix, user)
         st.divider()
+        _edit_job_code_control(job, key_prefix, user)
+        st.divider()
         _dependency_control(job, key_prefix, user["id"])
         st.divider()
         _notes_editor(job, key_prefix)
@@ -533,6 +535,35 @@ def _reassign_owner_control(job: dict, key_prefix: str, user: dict) -> None:
                 changed = models.reassign_owner(job["id"], staff_by_name[choice], actor_id=user["id"])
                 st.toast(f"Reassigned to {choice}." if changed else "Already owned by this person.", icon="✅")
                 st.rerun()
+
+
+def _edit_job_code_control(job: dict, key_prefix: str, user: dict) -> None:
+    """EC (principal)/admin/super_admin only: correct or manually set this
+    job's number. job_id is normally auto-generated and never touched
+    again — this exists for the rare "this was set wrong" case, and every
+    change is logged (who, when, old -> new) so a correction is never
+    silent."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        return
+    with st.expander("Edit job number"):
+        new_code = st.text_input("Job ID", value=job["job_id"], key=f"{key_prefix}_jobcode")
+        if st.button("Save job number", key=f"{key_prefix}_savejobcode"):
+            try:
+                models.update_job_code(job["id"], new_code, actor_id=user["id"])
+            except models.CodeEditError as e:
+                st.error(str(e))
+            else:
+                st.toast("Job number updated.", icon="✅")
+                st.rerun()
+
+        edits = models.list_code_edits("job", job["id"])
+        if edits:
+            st.caption("Edit history:")
+            for e in edits:
+                st.caption(
+                    f"{e['old_code']} → {e['new_code']} — {e['changed_by_name'] or '—'}, "
+                    f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
+                )
 
 
 def _dependency_control(job: dict, key_prefix: str, actor_id: int) -> None:
