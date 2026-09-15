@@ -190,7 +190,18 @@ def _info(job: dict) -> None:
     if attrs:
         service = models.get_service(job["service_type"]) if job["service_type"] else None
         field_labels = {f["key"]: f["label"] for f in (service["fields"] if service else [])}
-        st.write("**Details:** " + " · ".join(f"{field_labels.get(k, k)}: {v}" for k, v in attrs.items()))
+        bits = []
+        for k, v in attrs.items():
+            if k == "subject_count":
+                continue
+            if k == "subject_labels":
+                bits.append(f"Subjects ({attrs.get('subject_count', len(v))}): " + ", ".join(v))
+            elif k == "quantity":
+                bits.append(f"Quantity: {v}")
+            else:
+                bits.append(f"{field_labels.get(k, k)}: {v}")
+        if bits:
+            st.write("**Details:** " + " · ".join(bits))
 
     if job["description"]:
         st.write(f"**Description:** {job['description']}")

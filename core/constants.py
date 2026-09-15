@@ -125,6 +125,22 @@ RISK_EMOJI = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Quantity / multi-subject capture — Capture only shows the extra field(s)
+# below when the picked service is one of these, so the common case (no
+# quantity, no subjects) stays a plain, fast form. Values captured here are
+# a count and a short internal label only — never passport numbers, DOB or
+# other identity data, which stay in external secure storage.
+# ---------------------------------------------------------------------------
+QUANTITY_SERVICE_CODES = {"IMM-QUOTA"}
+
+MULTI_SUBJECT_SERVICE_CODES = {
+    "IMM-ECERPAC-PRINCIPAL",
+    "IMM-ECERPAC-DEP-SPOUSE",
+    "IMM-ECERPAC-DEP-CHILD",
+}
+
+
 def humanize(value: str, mapping: dict | None = None) -> str:
     """Turn a raw db value into a human label. Falls back to title-casing
     underscores so nothing ever shows a raw db value on screen."""

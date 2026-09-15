@@ -7,7 +7,15 @@ import streamlit as st
 
 from core import cit, models
 from core import ui
-from core.constants import SOURCE_CLIENT_EMAIL, SOURCE_LABELS, SOURCE_TEAM_GROUP_FORWARD, STATUS_LABELS_SHORT, humanize
+from core.constants import (
+    MULTI_SUBJECT_SERVICE_CODES,
+    QUANTITY_SERVICE_CODES,
+    SOURCE_CLIENT_EMAIL,
+    SOURCE_LABELS,
+    SOURCE_TEAM_GROUP_FORWARD,
+    STATUS_LABELS_SHORT,
+    humanize,
+)
 from core.seed_data import PILLAR_TO_CATEGORY
 
 MODE_JOB = "Log a job"
@@ -82,6 +90,25 @@ def _job_form(user: dict) -> None:
                 )
                 if val:
                     attributes[f["key"]] = val
+
+        if service["code"] in QUANTITY_SERVICE_CODES:
+            attributes["quantity"] = st.number_input(
+                "Quantity", min_value=1, value=1, step=1, key="cap_quantity",
+                help="e.g. how many quota positions this covers.",
+            )
+        elif service["code"] in MULTI_SUBJECT_SERVICE_CODES:
+            sub_col1, sub_col2 = st.columns([1, 2])
+            subject_count = sub_col1.number_input(
+                "Subjects covered", min_value=1, value=1, step=1, key="cap_subject_count",
+                help="How many expats does this process cover?",
+            )
+            default_labels = ", ".join(f"Expat {i + 1}" for i in range(subject_count))
+            labels_raw = sub_col2.text_input(
+                "Subject labels (comma-separated)", value=default_labels, key="cap_subject_labels",
+                help="Internal reference only — no passport numbers, DOB or identity docs.",
+            )
+            attributes["subject_count"] = subject_count
+            attributes["subject_labels"] = [lbl.strip() for lbl in labels_raw.split(",") if lbl.strip()]
 
     # Soft routing nudge: once a service picks a category, staff assigned to
     # that module (core.models.module_specialist) float to the top and the

@@ -1151,8 +1151,10 @@ def materialize_job_documents(job_pk: int, service_code: str, attributes: dict |
     if the job has one, its Type-field variant — requires. Matches on the
     job's own attribute *values* rather than a hardcoded field key, since
     which field counts as "the variant" differs by service; this is what
-    lets the same mechanism serve every future module unchanged."""
-    variants = list((attributes or {}).values()) or ["__none__"]
+    lets the same mechanism serve every future module unchanged. Only
+    string-valued attributes are candidate variants — quantity/subject-count
+    counts and subject-label lists never select a document requirement."""
+    variants = [v for v in (attributes or {}).values() if isinstance(v, str)] or ["__none__"]
     rows = query(
         "SELECT DISTINCT document_type_code FROM service_document_requirement "
         "WHERE service_code = %s AND (variant = '*' OR variant = ANY(%s))",
