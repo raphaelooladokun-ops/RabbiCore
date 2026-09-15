@@ -16,6 +16,7 @@ from core.constants import (
     RISK_GREEN,
     RISK_GREY,
     RISK_RED,
+    ROLE_ADMIN,
     ROLE_SUPER_ADMIN,
     STATUS_CLOSED,
     STATUS_DISMISSED,
@@ -128,25 +129,24 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
 
     filtered.sort(key=lambda j: (RISK_ORDER[models.compute_risk(j)], -j["created_at"].timestamp()))
 
-    if user["role"] == ROLE_SUPER_ADMIN:
-        _bulk_hide_table(filtered, key_prefix=f"{key_prefix}_all", user=user)
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+        _bulk_actions_table(filtered, key_prefix=f"{key_prefix}_all", user=user)
     else:
         ui.jobs_row_table(filtered, key_prefix=f"{key_prefix}_all")
     if filtered:
         st.caption(f"{len(filtered)} job(s)")
 
 
-_HIDE_TABLE_WIDTHS = [0.4, 0.4, 1.2, 1.6, 2.2, 1.2, 1.1, 1.0]
-_HIDE_TABLE_HEADERS = ["", "", "Job ID", "Client", "What", "Owner", "Status", "SLA date"]
+_BULK_TABLE_WIDTHS = [0.4, 0.4, 1.2, 1.6, 2.2, 1.2, 1.1, 1.0]
+_BULK_TABLE_HEADERS = ["", "", "Job ID", "Client", "What", "Owner", "Status", "SLA date"]
 
 
-def _bulk_hide_table(jobs: list, key_prefix: str, user: dict) -> None:
-    """super_admin only: the same clickable job table everyone else sees,
-    plus a per-row checkbox and a bulk 'Hide selected' action — clearing a
-    batch of demo/test jobs out of the register in one go, rather than
-    hiding them one at a time. Hiding is soft (the row stays in the
-    database, see models.hide_jobs) and immediately invisible to every
-    other role and every stat/count they see."""
+def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
+    """admin/super_admin: the same clickable job table everyone else sees,
+    plus a per-row checkbox and bulk actions — assign an owner (both
+    roles) and hide (super_admin only) — for acting on a batch of jobs at
+    once instead of one at a time. Most useful right after a bulk import
+    lands a run of unassigned New jobs in the register."""
     if not jobs:
         st.caption("Nothing here.")
         return
@@ -156,18 +156,18 @@ def _bulk_hide_table(jobs: list, key_prefix: str, user: dict) -> None:
     select_all = st.checkbox("Select all", key=select_key)
     if st.session_state.get(prev_key) != select_all:
         for j in jobs:
-            st.session_state[f"{key_prefix}_hide_{j['id']}"] = select_all
+            st.session_state[f"{key_prefix}_sel_{j['id']}"] = select_all
         st.session_state[prev_key] = select_all
         st.rerun()
 
-    header_cols = st.columns(_HIDE_TABLE_WIDTHS)
-    for col, label in zip(header_cols, _HIDE_TABLE_HEADERS):
+    header_cols = st.columns(_BULK_TABLE_WIDTHS)
+    for col, label in zip(header_cols, _BULK_TABLE_HEADERS):
         col.markdown(f"**{label}**")
 
     for j in jobs:
-        cols = st.columns(_HIDE_TABLE_WIDTHS)
+        cols = st.columns(_BULK_TABLE_WIDTHS)
         cols[0].checkbox(
-            "", key=f"{key_prefix}_hide_{j['id']}", label_visibility="collapsed",
+            "", key=f"{key_prefix}_sel_{j['id']}", label_visibility="collapsed",
         )
         cols[1].write(RISK_EMOJI[models.compute_risk(j)])
         if cols[2].button(ui.short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
@@ -178,16 +178,42 @@ def _bulk_hide_table(jobs: list, key_prefix: str, user: dict) -> None:
         cols[6].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[7].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
 
-    selected_ids = [j["id"] for j in jobs if st.session_state.get(f"{key_prefix}_hide_{j['id']}")]
-    st.write("")
-    if st.button(
-        f"Hide selected ({len(selected_ids)})", disabled=not selected_ids,
-        key=f"{key_prefix}_hidebtn", type="primary",
-    ):
-        models.hide_jobs(selected_ids, user["id"])
+    selected_ids = [j["id"] for j in jobs if st.session_state.get(f"{key_prefix}_sel_{j['id']}")]
+
+    def _clear_selection() -> None:
         for jid in selected_ids:
-            st.session_state.pop(f"{key_prefix}_hide_{jid}", None)
+            st.session_state.pop(f"{key_prefix}_sel_{jid}", None)
         st.session_state.pop(select_key, None)
         st.session_state.pop(prev_key, None)
-        st.toast(f"Hid {len(selected_ids)} job(s).", icon="✅")
-        st.rerun()
+
+    st.write("")
+    staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
+    staff_options = ["— choose owner —"] + [s["name"] for s in staff]
+    staff_by_name = {s["name"]: s["id"] for s in staff}
+
+    a1, a2 = st.columns([2, 1])
+    with a1:
+        owner_choice = st.selectbox(
+            "Assign selected to", options=staff_options,
+            key=f"{key_prefix}_assignto", label_visibility="collapsed",
+        )
+    with a2:
+        if st.button(
+            f"Assign selected ({len(selected_ids)})",
+            disabled=not selected_ids or owner_choice == "— choose owner —",
+            key=f"{key_prefix}_assignbtn", type="primary", use_container_width=True,
+        ):
+            changed = models.bulk_reassign_owner(selected_ids, staff_by_name[owner_choice], user["id"])
+            _clear_selection()
+            st.toast(f"Assigned {changed} job(s) to {owner_choice}.", icon="✅")
+            st.rerun()
+
+    if user["role"] == ROLE_SUPER_ADMIN:
+        if st.button(
+            f"Hide selected ({len(selected_ids)})", disabled=not selected_ids,
+            key=f"{key_prefix}_hidebtn",
+        ):
+            models.hide_jobs(selected_ids, user["id"])
+            _clear_selection()
+            st.toast(f"Hid {len(selected_ids)} job(s).", icon="✅")
+            st.rerun()

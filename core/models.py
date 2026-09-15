@@ -554,6 +554,32 @@ def force_unblock(job_pk: int) -> None:
     )
 
 
+def reassign_owner(job_pk: int, new_owner_id: int, actor_id: int | None = None) -> bool:
+    """Change who owns a job after creation — the shared primitive behind
+    both the job detail page's own reassign control and the register's
+    bulk-assign action. Returns False (a no-op) if the job is already
+    owned by this person. Notifies the new owner that the job is now
+    theirs; the previous owner isn't notified — the ask is "tell them",
+    not "announce every handoff to everyone with a stake in the job"."""
+    job = get_job(job_pk)
+    if not job or job["owner_id"] == new_owner_id:
+        return False
+    execute("UPDATE job SET owner_id = %s WHERE id = %s", (new_owner_id, job_pk))
+    create_notification(
+        new_owner_id, "reassigned", "job", job_pk,
+        f"{job['job_id']} assigned to you — {job['client_name'] or '—'} — {job['title']}",
+    )
+    return True
+
+
+def bulk_reassign_owner(job_pks: list, new_owner_id: int, actor_id: int | None = None) -> int:
+    """Bulk version of reassign_owner — one notification per job actually
+    changed, exactly as if each had been reassigned individually. Returns
+    how many jobs actually changed owner (already-owned-by-them rows are
+    skipped, not double-counted or double-notified)."""
+    return sum(1 for pk in job_pks if reassign_owner(pk, new_owner_id, actor_id))
+
+
 def update_job_fields(job_pk: int, **fields) -> None:
     if not fields:
         return
