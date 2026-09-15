@@ -36,6 +36,7 @@ from views import (
     job_detail,
     login,
     register,
+    services_admin,
     users,
     workload_report,
 )
@@ -100,6 +101,7 @@ NAV = {
         ("Immigration", immigration.render),
         ("CIT", cit.render),
         ("Billing", billing.render),
+        ("Services", services_admin.render),
     ],
     ROLE_SPECIALIST: [
         ("My Queue", home_specialist.render),
@@ -118,6 +120,7 @@ NAV = {
         ("CIT", cit.render),
         ("Billing", billing.render),
         ("Workload", workload_report.render),
+        ("Services", services_admin.render),
         ("Users", users.render),
         ("Bulk Upload", bulk_upload.render),
         ("Hidden Jobs", hidden_jobs.render),

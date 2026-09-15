@@ -77,6 +77,7 @@ CATEGORY_LABELS = {
     "immigration": "Immigration",
     "cit": "CIT",
     "state": "State Matters",
+    "other": "Other Services",
 }
 
 # ---------------------------------------------------------------------------

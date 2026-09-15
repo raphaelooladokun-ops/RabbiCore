@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS service_catalogue (
 -- reuse the exact same mechanism (models.create_next_cycle_job) later.
 ALTER TABLE service_catalogue ADD COLUMN IF NOT EXISTS recurring_frequency TEXT;
 
+-- Widening migration: admin/super_admin can add a new service that doesn't
+-- fit the 4 locked pillars — it goes under a 5th, "Other" pillar/category,
+-- selectable in Capture like any other from the moment it's created.
+ALTER TABLE service_catalogue DROP CONSTRAINT IF EXISTS service_catalogue_pillar_check;
+ALTER TABLE service_catalogue ADD CONSTRAINT service_catalogue_pillar_check
+    CHECK (pillar IN ('CAC', 'Immigration', 'CIT', 'State', 'Other'));
+
 -- ---------------------------------------------------------------------------
 -- INVOICE — one invoice groups many jobs. Admin creates (submits for
 -- approval); principal approves. A job can only close once its invoice is
@@ -159,6 +166,12 @@ CREATE TABLE IF NOT EXISTS job (
 -- Widening migration for installs created before client_id became nullable
 -- (dismissed items may not be tied to a client); no-op if already nullable.
 ALTER TABLE job ALTER COLUMN client_id DROP NOT NULL;
+
+-- Widening migration: 'other' is the job.category for any service added
+-- under the new "Other Services" pillar (see service_catalogue above).
+ALTER TABLE job DROP CONSTRAINT IF EXISTS job_category_check;
+ALTER TABLE job ADD CONSTRAINT job_category_check
+    CHECK (category IN ('front_office', 'cac', 'immigration', 'cit', 'state', 'other'));
 
 -- Widening migration: a CSV-imported job (the bulk upload feature) is
 -- neither a client email nor a team-group forward — it's its own source,
@@ -450,3 +463,7 @@ CREATE TABLE IF NOT EXISTS module_specialist (
     staff_id        INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
     UNIQUE (category, staff_id)
 );
+
+ALTER TABLE module_specialist DROP CONSTRAINT IF EXISTS module_specialist_category_check;
+ALTER TABLE module_specialist ADD CONSTRAINT module_specialist_category_check
+    CHECK (category IN ('cac', 'immigration', 'cit', 'state', 'other'));

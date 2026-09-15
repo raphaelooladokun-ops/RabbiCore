@@ -122,6 +122,7 @@ PILLAR_TO_CATEGORY = {
     "Immigration": "immigration",
     "CIT": "cit",
     "State": "state",
+    "Other": "other",
 }
 
 # ---------------------------------------------------------------------------

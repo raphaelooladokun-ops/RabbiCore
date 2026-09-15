@@ -238,6 +238,44 @@ def get_service(code: str):
     return query_one("SELECT * FROM service_catalogue WHERE code = %s", (code,))
 
 
+_PILLAR_CODE_PREFIX = {"CAC": "CAC", "Immigration": "IMM", "CIT": "CIT", "State": "STATE", "Other": "OTHER"}
+
+
+class ServiceCreateError(Exception):
+    pass
+
+
+def create_service(name: str, pillar: str) -> dict:
+    """Admin/super_admin-only: add a new service to the catalogue. A
+    service outside the 4 locked pillars goes under 'Other' (job.category
+    'other') — selectable in Capture immediately, exactly like any other
+    service, since Capture always reads the live catalogue rather than a
+    hardcoded list. The code is auto-generated from the name (never
+    typed), with a numeric suffix appended if it would otherwise collide."""
+    name = name.strip()
+    if not name:
+        raise ServiceCreateError("Enter a service name.")
+    if query_one("SELECT 1 FROM service_catalogue WHERE lower(name) = lower(%s)", (name,)):
+        raise ServiceCreateError(f"A service named '{name}' already exists.")
+
+    prefix = _PILLAR_CODE_PREFIX.get(pillar, "SVC")
+    slug = re.sub(r"[^A-Z0-9]+", "-", name.upper()).strip("-")
+    base_code = f"{prefix}-{slug}"[:60]
+    code = base_code
+    n = 2
+    while query_one("SELECT 1 FROM service_catalogue WHERE code = %s", (code,)):
+        code = f"{base_code}-{n}"[:60]
+        n += 1
+
+    max_sort = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM service_catalogue")["m"]
+    execute(
+        "INSERT INTO service_catalogue (code, pillar, name, fields, active, sort_order) "
+        "VALUES (%s, %s, %s, '[]'::jsonb, TRUE, %s)",
+        (code, pillar, name, max_sort + 1),
+    )
+    return get_service(code)
+
+
 # ---------------------------------------------------------------------------
 # Job creation
 # ---------------------------------------------------------------------------
