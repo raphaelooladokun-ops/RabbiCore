@@ -174,6 +174,24 @@ ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;
 ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden_by INTEGER REFERENCES staff(id);
 
+-- started_at/completed_at: set ONCE, the first time a job crosses into
+-- in_progress / done (see models.set_status) — never overwritten by a later
+-- transition (a job that's blocked then resumed keeps its original
+-- started_at; one marked done then later re-closed keeps its original
+-- completed_at). This is the shared timestamp pair behind both the
+-- specialist workload report and each job's own elapsed-time badge.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+-- One-time backfill for jobs that already existed before this feature —
+-- status_changed_at is the best available approximation for rows with no
+-- real history to draw on. Guarded by "IS NULL" so it only ever fires once
+-- per row; every transition from here on sets these for real in set_status.
+UPDATE job SET started_at = status_changed_at
+    WHERE started_at IS NULL AND status IN ('in_progress', 'blocked', 'done', 'closed');
+UPDATE job SET completed_at = status_changed_at
+    WHERE completed_at IS NULL AND status IN ('done', 'closed');
+
 CREATE INDEX IF NOT EXISTS idx_job_client_id ON job(client_id);
 CREATE INDEX IF NOT EXISTS idx_job_owner_id ON job(owner_id);
 CREATE INDEX IF NOT EXISTS idx_job_status ON job(status);

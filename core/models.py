@@ -547,6 +547,16 @@ def set_status(job_pk: int, new_status: str, reason: str | None = None, actor_id
     except psycopg2.errors.RaiseException as e:
         raise JobRuleError(str(e).split("\n")[0]) from e
 
+    # started_at/completed_at are set ONCE, on the first-ever crossing into
+    # in_progress/done — the "WHERE ... IS NULL" is what keeps a later
+    # blocked-then-resumed or done-then-closed transition from overwriting
+    # the original timestamp. Powers both the workload report and each
+    # job's own elapsed-time badge.
+    if new_status == STATUS_IN_PROGRESS:
+        execute("UPDATE job SET started_at = now() WHERE id = %s AND started_at IS NULL", (job_pk,))
+    if new_status == STATUS_DONE:
+        execute("UPDATE job SET completed_at = now() WHERE id = %s AND completed_at IS NULL", (job_pk,))
+
     if new_status in (STATUS_DONE, STATUS_BLOCKED):
         _notify_status_change(job_pk, new_status, reason, actor_id)
     if new_status in (STATUS_DONE, STATUS_CLOSED):
@@ -1183,6 +1193,54 @@ def list_recurring_jobs(category: str | None = None) -> list:
     ]
     out.sort(key=lambda j: j["sla_date"] or date.max)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Workload reporting + elapsed-time tracking — both built on the same
+# started_at/completed_at pair set once in set_status() above.
+# ---------------------------------------------------------------------------
+def workload_report(date_from: date, date_to: date) -> list:
+    """Per-specialist count of jobs "carried out" — started and/or
+    completed — within [date_from, date_to] (inclusive, whole days). A job
+    counts once even if it was both started and completed in the same
+    window. Ordered busiest first."""
+    rows = query(
+        """
+        SELECT s.id AS staff_id, s.name AS staff_name, COUNT(DISTINCT j.id) AS job_count
+        FROM staff s
+        JOIN job j ON j.owner_id = s.id AND j.hidden = FALSE
+        WHERE (j.started_at::date BETWEEN %s AND %s) OR (j.completed_at::date BETWEEN %s AND %s)
+        GROUP BY s.id, s.name
+        ORDER BY job_count DESC, s.name
+        """,
+        (date_from, date_to, date_from, date_to),
+    )
+    return rows
+
+
+def format_duration(start, end) -> str:
+    """Human-readable elapsed time between two datetimes, coarsest-unit-
+    first ("2 weeks 1 day", "3 days", "5 hours", "12 minutes") — exactly
+    the granularity a "how long has this been running" badge needs, never
+    down to the second."""
+    delta = end - start
+    total_seconds = int(delta.total_seconds())
+    if total_seconds < 60:
+        return "just now"
+    minutes = total_seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    days = hours // 24
+    weeks, rem_days = divmod(days, 7)
+    if weeks == 0:
+        return f"{days} day{'s' if days != 1 else ''}"
+    parts = [f"{weeks} week{'s' if weeks != 1 else ''}"]
+    if rem_days:
+        parts.append(f"{rem_days} day{'s' if rem_days != 1 else ''}")
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------

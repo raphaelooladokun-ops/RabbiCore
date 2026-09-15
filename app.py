@@ -37,6 +37,7 @@ from views import (
     login,
     register,
     users,
+    workload_report,
 )
 
 st.set_page_config(page_title="Rabbi Core", page_icon="📋", layout="wide")
@@ -90,6 +91,7 @@ NAV = {
         ("Immigration", immigration.render),
         ("CIT", cit.render),
         ("Billing", billing.render),
+        ("Workload", workload_report.render),
     ],
     ROLE_ADMIN: [
         ("Home", home_admin.render),
@@ -115,6 +117,7 @@ NAV = {
         ("Immigration", immigration.render),
         ("CIT", cit.render),
         ("Billing", billing.render),
+        ("Workload", workload_report.render),
         ("Users", users.render),
         ("Bulk Upload", bulk_upload.render),
         ("Hidden Jobs", hidden_jobs.render),

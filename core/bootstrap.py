@@ -142,6 +142,17 @@ def seed_demo_data() -> None:
         )
         job_pk_by_job_id[j["job_id"]] = row["id"]
 
+        # Demo jobs are inserted directly at their target status rather
+        # than walking through models.set_status(), so started_at/
+        # completed_at (normally set there, once, on the real transition)
+        # need the same one-time backfill here — otherwise every seed job
+        # would read as "never started" for the workload report and the
+        # elapsed-time badge.
+        if j["status"] in ("in_progress", "blocked", "done", "closed"):
+            execute("UPDATE job SET started_at = now() WHERE id = %s", (row["id"],))
+        if j["status"] in ("done", "closed"):
+            execute("UPDATE job SET completed_at = now() WHERE id = %s", (row["id"],))
+
     for inv in DEMO_INVOICES:
         existing = query_one("SELECT id FROM invoice WHERE invoice_code = %s", (inv["invoice_code"],))
         if existing:
