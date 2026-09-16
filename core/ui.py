@@ -54,8 +54,21 @@ def staff_label(s: dict) -> str:
     name — every staff picker in the app (Capture's Owner field, module
     specialist assignment, bulk-assign, reassign, the Users list) keys off
     this rather than the bare name, so a duplicate name can never silently
-    collide with or shadow another person's entry in a dropdown."""
-    return f"{s['name']} (#{s['id']})"
+    collide with or shadow another person's entry in a dropdown. Shows
+    their login username (staff.email) rather than the numeric database
+    id — the id means nothing to anyone matching people up day to day.
+    Plain text: selectbox options don't render markdown, so this is what
+    every dropdown built from this label should use. For text rendered
+    through st.write/st.markdown/st.warning, use staff_label_md instead —
+    a bare email there would otherwise auto-link as a mailto: address."""
+    return f"{s['name']} ({s['email']})"
+
+
+def staff_label_md(s: dict) -> str:
+    """Markdown-safe variant of staff_label for st.write/st.markdown/
+    st.warning contexts — backtick-wraps the email so Streamlit's markdown
+    renderer can't turn it into a clickable mailto: link."""
+    return f"{s['name']} (`{s['email']}`)"
 
 
 def risk_legend() -> None:

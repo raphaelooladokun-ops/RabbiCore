@@ -45,13 +45,13 @@ def render(user: dict) -> None:
         st.caption("No jobs started or completed by any specialist in this range.")
         return
 
-    header = st.columns([3, 1.3, 1.6])
-    for col, label in zip(header, ["Specialist", "User ID", "Jobs carried out"]):
+    header = st.columns([3, 2, 1.6])
+    for col, label in zip(header, ["Specialist", "Username", "Jobs carried out"]):
         col.markdown(f"**{label}**")
     for r in rows:
-        cols = st.columns([3, 1.3, 1.6])
+        cols = st.columns([3, 2, 1.6])
         cols[0].write(r["staff_name"])
-        cols[1].write(f"#{r['staff_id']}")
+        cols[1].write(f"`{r['staff_email']}`")
         with cols[2].popover(str(r["job_count"]), key=f"wl_pop_{r['staff_id']}"):
             st.markdown(f"**{r['staff_name']} — jobs in this range**")
             for j in models.workload_report_jobs(r["staff_id"], date_from, date_to):

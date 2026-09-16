@@ -90,7 +90,7 @@ def _specialist_assignment() -> None:
     if assigned:
         for a in assigned:
             c1, c2 = st.columns([3, 1])
-            c1.write(ui.staff_label({"name": a["staff_name"], "id": a["staff_id"]}))
+            c1.write(ui.staff_label_md({"name": a["staff_name"], "email": a["staff_email"]}))
             if c2.button("Remove", key=f"rmspec_{a['id']}"):
                 models.unassign_module_specialist("immigration", a["staff_id"])
                 st.rerun()

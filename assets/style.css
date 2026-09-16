@@ -222,6 +222,13 @@ button[kind="secondary"],
     color: var(--rc-grey);
     margin-bottom: 1.25rem;
 }
+.rc-job-title {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 700;
+    font-size: 1.3rem;
+    color: var(--rc-navy);
+    margin-bottom: 1.25rem;
+}
 
 /* ---- Metric tiles ----------------------------------------------------- */
 [data-testid="stMetric"] {

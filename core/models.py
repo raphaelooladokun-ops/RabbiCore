@@ -1382,11 +1382,11 @@ def workload_report(date_from: date, date_to: date) -> list:
     window. Ordered busiest first."""
     rows = query(
         """
-        SELECT s.id AS staff_id, s.name AS staff_name, COUNT(DISTINCT j.id) AS job_count
+        SELECT s.id AS staff_id, s.name AS staff_name, s.email AS staff_email, COUNT(DISTINCT j.id) AS job_count
         FROM staff s
         JOIN job j ON j.owner_id = s.id AND j.hidden = FALSE
         WHERE (j.started_at::date BETWEEN %s AND %s) OR (j.completed_at::date BETWEEN %s AND %s)
-        GROUP BY s.id, s.name
+        GROUP BY s.id, s.name, s.email
         ORDER BY job_count DESC, s.name
         """,
         (date_from, date_to, date_from, date_to),

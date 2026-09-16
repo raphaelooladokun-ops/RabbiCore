@@ -140,7 +140,7 @@ def _header(job: dict, user: dict) -> None:
         badges += "&nbsp;&nbsp;" + time_badge
     st.markdown(badges, unsafe_allow_html=True)
     st.markdown(
-        f'<div class="rc-page-subtitle" style="margin-top:0.5rem;">{job["title"]}</div>',
+        f'<div class="rc-job-title" style="margin-top:0.5rem;">{job["title"]}</div>',
         unsafe_allow_html=True,
     )
 

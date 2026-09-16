@@ -80,7 +80,7 @@ def _create_user_form() -> None:
     create_anyway = True
     if duplicate:
         st.warning(
-            f"⚠️ An active user named **{ui.staff_label(duplicate)}** already exists — "
+            f"⚠️ An active user named **{ui.staff_label_md(duplicate)}** already exists — "
             "check this is genuinely a different person before creating another."
         )
         create_anyway = st.checkbox("Create anyway — this is a different person", key="cu_createanyway")
@@ -109,26 +109,27 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [0.7, 1.5, 0.9, 1.1, 0.7, 1.2, 1.0, 1.1, 0.8]
+_ROW_WIDTHS = [2.0, 1.2, 0.7, 0.7, 0.5, 0.8, 1.0, 1.1, 0.8]
 
 
 def _users_list() -> None:
     st.markdown("#### All users")
     st.caption(
         "Lost or need to hand out a password again? Use **Reset password** — it issues a fresh one "
-        "on the spot; the old one is never stored anywhere it could be looked up later. The **ID** "
-        "column tells apart two people who happen to share a name."
+        "on the spot; the old one is never stored anywhere it could be looked up later. The "
+        "**Username** column is what they log in with — it tells apart two people who happen to "
+        "share a name."
     )
     staff = [s for s in models.list_staff(active_only=False) if s["role"] != "client"]
     categories_by_staff = models.list_staff_categories()
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["ID", "Name", "Role", "Speciality", "Status", "Created", "", "", ""]):
+    for col, label in zip(header, ["Username", "Name", "Role", "Speciality", "Status", "Created", "", "", ""]):
         col.markdown(f"**{label}**")
 
     for s in staff:
         cols = st.columns(_ROW_WIDTHS)
-        cols[0].write(f"#{s['id']}")
+        cols[0].write(f"`{s['email']}`")
         cols[1].write(s["name"])
         cols[2].write(ROLE_LABELS.get(s["role"], s["role"]))
         specialities = categories_by_staff.get(s["id"], [])
