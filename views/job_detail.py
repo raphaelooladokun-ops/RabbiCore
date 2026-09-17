@@ -16,6 +16,7 @@ from core.constants import (
     CATEGORY_LABELS,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
+    ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
@@ -87,7 +88,7 @@ def render(user: dict, job_pk: int) -> None:
         _cit_section(job, user, gate_active=gate_active)
     st.divider()
 
-    editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+    editable = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
 
@@ -112,13 +113,13 @@ def render(user: dict, job_pk: int) -> None:
     # done — so this section (and Create invoice within it) is available at
     # any non-dismissed status for admin/principal, not gated to done/closed.
     show_invoice_section = (
-        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED
+        user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED
     ) or (user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and job["invoice_code"])
     if show_invoice_section:
         _invoice_section(job, user)
         st.divider()
 
-    can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+    can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
     if can_see_expenses:
@@ -148,9 +149,9 @@ def _header(job: dict, user: dict) -> None:
 def _time_on_job_badge_html(job: dict, user: dict) -> str | None:
     """Compact elapsed-time badge: "On for X" while in progress, "Took X"
     once done — both read from the same started_at/completed_at pair the
-    workload report uses. Visible to the owning specialist, admin, EC
-    (principal) and super_admin; nobody else, same as the expense log."""
-    can_see = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+    workload report uses. Visible to the owning specialist, admin, manager,
+    EC (principal) and super_admin; nobody else, same as the expense log."""
+    can_see = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
     if not can_see or not job.get("started_at"):
@@ -242,7 +243,7 @@ def _document_checklist_section(
         )
         st.write("")
 
-    editable = user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+    editable = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and not gate_locked
     )
     if gate_locked and user["role"] == ROLE_SPECIALIST and docs:
@@ -448,6 +449,9 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
                 _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
         else:
             st.info(f"Can't start yet — {block_reason}")
+            # Overriding the invoice-before-work rule is exactly the kind of
+            # "override system rules" authority reserved to EC/super_admin —
+            # manager is deliberately never added here.
             if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
                 with st.form(key=f"{key_prefix}_override_form"):
                     st.write("Allow this job to start without an approved invoice")
@@ -525,10 +529,10 @@ def _apply_status(job_pk: int, new_status: str, reason: str | None = None, actor
 
 
 def _reassign_owner_control(job: dict, key_prefix: str, user: dict) -> None:
-    """admin/super_admin only: change who owns this job after creation.
+    """admin/manager/super_admin: change who owns this job after creation.
     Shares models.reassign_owner with the register's bulk-assign action —
     the same primitive, just applied to one job at a time here."""
-    if user["role"] not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         return
     with st.expander("Reassign owner"):
         staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
@@ -549,12 +553,12 @@ def _reassign_owner_control(job: dict, key_prefix: str, user: dict) -> None:
 
 
 def _edit_job_code_control(job: dict, key_prefix: str, user: dict) -> None:
-    """EC (principal)/admin/super_admin only: correct or manually set this
-    job's number. job_id is normally auto-generated and never touched
+    """EC (principal)/admin/manager/super_admin: correct or manually set
+    this job's number. job_id is normally auto-generated and never touched
     again — this exists for the rare "this was set wrong" case, and every
     change is logged (who, when, old -> new) so a correction is never
     silent."""
-    if user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
         return
     with st.expander("Edit job number"):
         new_code = st.text_input("Job ID", value=job["job_id"], key=f"{key_prefix}_jobcode")
@@ -620,10 +624,10 @@ def _notes_editor(job: dict, key_prefix: str) -> None:
 
 
 def _duplicate_control(job: dict, key_prefix: str, user: dict) -> None:
-    """Admin-only way to remove a genuine duplicate without a hard delete —
-    dismisses it with a reason, same as any other dismissal, so the record
-    and its audit trail stay intact."""
-    if user["role"] not in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    """Admin/manager/super_admin way to remove a genuine duplicate without a
+    hard delete — dismisses it with a reason, same as any other dismissal,
+    so the record and its audit trail stay intact."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         return
     with st.expander("Mark as duplicate"):
         st.caption(
@@ -660,14 +664,14 @@ def _invoice_section(job: dict, user: dict) -> None:
             ui.go_to_invoice(job["invoice_id"])
     else:
         st.caption("Not yet invoiced.")
-        if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED:
+        if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED:
             if st.button("Create invoice", key=f"jd_createinv_{job['id']}", type="primary"):
                 st.session_state["invoice_seed_job"] = job["id"]
                 st.session_state["invoice_seed_client"] = None
                 st.session_state["invoice_revise_id"] = None
                 ui.go_to_create_invoice()
 
-    invoice_closable_roles = (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+    invoice_closable_roles = (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
     if user["role"] in invoice_closable_roles and job["status"] == STATUS_DONE and job["invoice_id"]:
         if job["invoice_status"] not in ("approved", "paid"):
             st.info(f"Waiting on approval for invoice **{job['invoice_code']}** before this job can close.")
@@ -706,7 +710,7 @@ def _expenses(job: dict, user: dict) -> None:
     else:
         st.caption("No expenses logged yet.")
 
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         with st.form(key=f"expense_form_{job['id']}", clear_on_submit=True):
             st.write("Add expense")
             c1, c2, c3 = st.columns([2, 1, 1])

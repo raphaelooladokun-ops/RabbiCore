@@ -15,6 +15,15 @@ ROLE_CLIENT = "client"
 # of this role alongside its existing allowed roles, never a replacement,
 # so principal/admin/specialist/client keep exactly the access they had.
 ROLE_SUPER_ADMIN = "super_admin"
+# Runs the operation day-to-day: near-full operational visibility (every
+# job, module, client, specialist), can assign/reassign work, create
+# invoices and push them for approval, and edit names/details. Final
+# financial and irreversible authority — approving/un-approving an
+# invoice, permanent deletion, overriding system rules — stays with
+# ROLE_PRINCIPAL (EC) and ROLE_SUPER_ADMIN; every manager role-gate in the
+# app is an addition alongside admin's existing access, mirroring admin
+# plus the extra oversight views, never a replacement of anyone else's.
+ROLE_MANAGER = "manager"
 
 ROLE_LABELS = {
     ROLE_PRINCIPAL: "Principal",
@@ -22,6 +31,7 @@ ROLE_LABELS = {
     ROLE_SPECIALIST: "Specialist",
     ROLE_CLIENT: "Client",
     ROLE_SUPER_ADMIN: "Super Admin",
+    ROLE_MANAGER: "Manager",
 }
 
 # ---------------------------------------------------------------------------

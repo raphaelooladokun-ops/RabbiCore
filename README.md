@@ -86,6 +86,7 @@ Seeded automatically — one per role, same demo password for all:
 | Role | Email | Password |
 |---|---|---|
 | Principal | `ec@rabbiconsult.test` | `RabbiDemo123!` |
+| Manager | `manager@rabbiconsult.test` | `RabbiDemo123!` |
 | Admin | `admin@rabbiconsult.test` | `RabbiDemo123!` |
 | Specialist | `specialist@rabbiconsult.test` | `RabbiDemo123!` |
 | Client | `client@rabbiconsult.test` | `RabbiDemo123!` |

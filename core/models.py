@@ -17,6 +17,7 @@ from core.constants import (
     RISK_GREY,
     RISK_RED,
     ROLE_ADMIN,
+    ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     STATUS_BLOCKED,
@@ -1083,7 +1084,7 @@ def _notify_comment(job_pk: int, author_id: int) -> None:
     recipients = set()
     if job["owner_id"] and job["owner_id"] != author_id:
         recipients.add(job["owner_id"])
-    for s in list_staff(role=ROLE_ADMIN) + list_staff(role=ROLE_PRINCIPAL):
+    for s in list_staff(role=ROLE_ADMIN) + list_staff(role=ROLE_PRINCIPAL) + list_staff(role=ROLE_MANAGER):
         if s["id"] != author_id:
             recipients.add(s["id"])
     for staff_id in recipients:

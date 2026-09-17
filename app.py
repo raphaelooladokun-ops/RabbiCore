@@ -14,6 +14,7 @@ from core.constants import (
     ROLE_ADMIN,
     ROLE_CLIENT,
     ROLE_LABELS,
+    ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
@@ -108,6 +109,21 @@ NAV = {
     ],
     ROLE_CLIENT: [
         ("My Jobs", home_client.render),
+    ],
+    # Near-full operational visibility (Overview + Home), everything admin
+    # can do (Capture/Register/Immigration/CIT/Billing/Services/Workload),
+    # minus the final-authority actions reserved to EC/super_admin (those
+    # are gated inside each view, not by nav — see core/constants.py).
+    ROLE_MANAGER: [
+        ("Overview", home_principal.render),
+        ("Home", home_admin.render),
+        ("Capture", capture.render),
+        ("Register", lambda u: register.render(u)),
+        ("Immigration", immigration.render),
+        ("CIT", cit.render),
+        ("Billing", billing.render),
+        ("Workload", workload_report.render),
+        ("Services", services_admin.render),
     ],
     # Full access — the union of every other role's environment, so the
     # firm owner can see and act on all of it from one account.

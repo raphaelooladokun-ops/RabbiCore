@@ -1,8 +1,9 @@
 """The invoice document — laid out like a real invoice (bill-to, line
-items, total), not a form. Principal can edit amounts/descriptions and
-approve, or reject with a reason; admin can revise a rejected invoice, mark
-it sent to the client, or mark it paid. A downloadable PDF is available once
-it's approved."""
+items, total), not a form. Principal (EC) or super_admin can edit amounts/
+descriptions and give the final approval, or reject with a reason —
+manager cannot, that authority stays with EC/super_admin. Admin/manager/
+super_admin can revise a rejected invoice, mark it sent to the client, or
+mark it paid. A downloadable PDF is available once it's approved."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from core import ui
 from core.constants import (
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
+    ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
@@ -39,7 +41,7 @@ def render(user: dict, invoice_pk: int) -> None:
         if not any(j["owner_id"] == user["id"] for j in invoice_jobs):
             st.error("You don't have access to this invoice.")
             return
-    elif user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL):
+    elif user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL):
         st.error("You don't have access to this invoice.")
         return
 
@@ -66,13 +68,15 @@ def render(user: dict, invoice_pk: int) -> None:
 
 
 def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> None:
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] == "rejected":
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN) and invoice["status"] == "rejected":
         st.write("")
         if st.button("Revise & resubmit", type="primary", key="inv_revise"):
             st.session_state["invoice_revise_id"] = invoice["id"]
             ui.go_to_create_invoice()
 
-    if invoice["status"] in ("approved", "paid") and user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+    if invoice["status"] in ("approved", "paid") and user["role"] in (
+        ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN,
+    ):
         st.write("")
         pdf_bytes = pdf_module.build_invoice_pdf(invoice, lines, total)
         st.download_button(
@@ -80,7 +84,7 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
             mime="application/pdf", key="inv_pdf",
         )
 
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] in ("approved", "paid"):
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN) and invoice["status"] in ("approved", "paid"):
         st.write("")
         if invoice.get("sent_at"):
             st.caption(f"Sent to client on {invoice['sent_at'].strftime('%d %b %Y')}.")
@@ -90,7 +94,7 @@ def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> 
                 st.toast("Marked sent to client.", icon="✅")
                 st.rerun()
 
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN) and invoice["status"] == "approved":
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN) and invoice["status"] == "approved":
         st.write("")
         with st.expander("Mark as paid"):
             with st.form(key="inv_paid_form"):
@@ -167,12 +171,12 @@ def _remove_approval_control(invoice: dict, user: dict) -> None:
 
 
 def _edit_invoice_code_control(invoice: dict, user: dict) -> None:
-    """EC (principal)/admin/super_admin only: correct or manually set this
-    invoice's number. invoice_code is normally auto-generated and never
-    touched again — this exists for the rare "this was set wrong" case,
-    and every change is logged (who, when, old -> new) so a correction is
-    never silent."""
-    if user["role"] not in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+    """EC (principal)/admin/manager/super_admin: correct or manually set
+    this invoice's number. invoice_code is normally auto-generated and
+    never touched again — this exists for the rare "this was set wrong"
+    case, and every change is logged (who, when, old -> new) so a
+    correction is never silent."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
         return
     st.write("")
     with st.expander("Edit invoice number"):

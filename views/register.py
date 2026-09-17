@@ -17,6 +17,7 @@ from core.constants import (
     RISK_GREY,
     RISK_RED,
     ROLE_ADMIN,
+    ROLE_MANAGER,
     ROLE_SUPER_ADMIN,
     STATUS_CLOSED,
     STATUS_DISMISSED,
@@ -129,7 +130,7 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
 
     filtered.sort(key=lambda j: (RISK_ORDER[models.compute_risk(j)], -j["created_at"].timestamp()))
 
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         _bulk_actions_table(filtered, key_prefix=f"{key_prefix}_all", user=user)
     else:
         ui.jobs_row_table(filtered, key_prefix=f"{key_prefix}_all")
@@ -142,11 +143,11 @@ _BULK_TABLE_HEADERS = ["", "", "Job ID", "Client", "What", "Owner", "Status", "S
 
 
 def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
-    """admin/super_admin: the same clickable job table everyone else sees,
-    plus a per-row checkbox and bulk actions — assign an owner (both
-    roles) and hide (super_admin only) — for acting on a batch of jobs at
-    once instead of one at a time. Most useful right after a bulk import
-    lands a run of unassigned New jobs in the register."""
+    """admin/manager/super_admin: the same clickable job table everyone else
+    sees, plus a per-row checkbox and bulk actions — assign an owner (all
+    three roles) and hide (super_admin only) — for acting on a batch of
+    jobs at once instead of one at a time. Most useful right after a bulk
+    import lands a run of unassigned New jobs in the register."""
     if not jobs:
         st.caption("Nothing here.")
         return

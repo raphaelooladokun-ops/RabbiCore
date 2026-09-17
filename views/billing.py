@@ -10,7 +10,14 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import INVOICE_STATUS_LABELS, ROLE_ADMIN, ROLE_SUPER_ADMIN, STATUS_LABELS_SHORT, humanize
+from core.constants import (
+    INVOICE_STATUS_LABELS,
+    ROLE_ADMIN,
+    ROLE_MANAGER,
+    ROLE_SUPER_ADMIN,
+    STATUS_LABELS_SHORT,
+    humanize,
+)
 
 _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.3]
 
@@ -18,7 +25,7 @@ _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.3]
 def render(user: dict) -> None:
     ui.page_header("Billing", _subtitle(user["role"]))
 
-    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         _ready_to_invoice()
         st.divider()
 
@@ -26,7 +33,7 @@ def render(user: dict) -> None:
 
 
 def _subtitle(role: str) -> str:
-    if role in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+    if role in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         return "Every unbilled job — invoice it as soon as it's logged."
     return "Every invoice — open one pending your approval to review it as a document."
 

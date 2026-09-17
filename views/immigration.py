@@ -11,7 +11,7 @@ import streamlit as st
 
 from core import immigration, models
 from core import ui
-from core.constants import ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN
+from core.constants import ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN
 from views import register as register_view
 
 _URGENCY_ICON = {"expired": "🔴", "due": "🟠", "approaching": "🟡"}
@@ -25,7 +25,7 @@ def render(user: dict) -> None:
     _quota_blocked_jobs()
     st.divider()
 
-    if user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
         _specialist_assignment()
         st.divider()
 

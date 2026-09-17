@@ -32,11 +32,14 @@ CREATE TABLE IF NOT EXISTS staff (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Migration for installs created before 'super_admin' existed — widen the
--- check constraint without touching any existing row. No-op once migrated.
+-- Widening migration: the day-to-day operations manager role — near-full
+-- operational visibility, final financial/irreversible authority stays
+-- with EC (principal) and super_admin. Safe to re-run: this is already the
+-- widest version of the constraint, so re-applying it is a no-op even
+-- once rows with role = 'manager' exist.
 ALTER TABLE staff DROP CONSTRAINT IF EXISTS staff_role_check;
 ALTER TABLE staff ADD CONSTRAINT staff_role_check
-    CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin'));
+    CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin', 'manager'));
 
 -- ---------------------------------------------------------------------------
 -- SERVICE CATALOGUE — the locked 43-service catalogue (CAC / Immigration /

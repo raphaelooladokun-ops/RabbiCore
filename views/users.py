@@ -16,9 +16,17 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import CATEGORY_LABELS, ROLE_ADMIN, ROLE_LABELS, ROLE_PRINCIPAL, ROLE_SPECIALIST, ROLE_SUPER_ADMIN
+from core.constants import (
+    CATEGORY_LABELS,
+    ROLE_ADMIN,
+    ROLE_LABELS,
+    ROLE_MANAGER,
+    ROLE_PRINCIPAL,
+    ROLE_SPECIALIST,
+    ROLE_SUPER_ADMIN,
+)
 
-_CREATABLE_ROLES = [ROLE_PRINCIPAL, ROLE_ADMIN, ROLE_SPECIALIST]
+_CREATABLE_ROLES = [ROLE_PRINCIPAL, ROLE_MANAGER, ROLE_ADMIN, ROLE_SPECIALIST]
 _SPECIALITY_CATEGORIES = ["immigration", "cit", "state"]
 _CREDENTIALS_KEY = "new_user_credentials"
 
