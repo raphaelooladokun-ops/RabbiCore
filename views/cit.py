@@ -18,6 +18,7 @@ from core.constants import (
     ROLE_SUPER_ADMIN,
     STATUS_LABELS_SHORT,
     humanize,
+    titlecase_name,
 )
 from views import register as register_view
 
@@ -59,9 +60,9 @@ def _upcoming_expiries() -> None:
         row_cols[0].write(_URGENCY_ICON[urgency])
         if row_cols[1].button(ui.short_job_id(r["job_code"]), key=f"exp_{r['job_document_id']}", type="tertiary"):
             ui.go_to_job(r["job_pk"])
-        row_cols[2].write(f"{r['document_name']} — {r['client_name'] or '—'}")
+        row_cols[2].write(f"{r['document_name']} — {titlecase_name(r['client_name']) or '—'}")
         row_cols[3].write(r["title"])
-        row_cols[4].write(r["owner_name"] or "—")
+        row_cols[4].write(titlecase_name(r["owner_name"]) or "—")
         row_cols[5].write(f"{models.EXPIRY_URGENCY_LABELS[urgency]} · {r['expiry_date'].isoformat()}")
 
 
@@ -84,9 +85,9 @@ def _recurring_obligations() -> None:
         row_cols = st.columns([1.1, 2.0, 1.6, 1.2, 1.2, 1.1])
         if row_cols[0].button(ui.short_job_id(j["job_id"]), key=f"rec_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
-        row_cols[1].write(j.get("client_name") or "—")
+        row_cols[1].write(titlecase_name(j.get("client_name")) or "—")
         row_cols[2].write(j["title"])
-        row_cols[3].write(j.get("owner_name") or "—")
+        row_cols[3].write(titlecase_name(j.get("owner_name")) or "—")
         row_cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         row_cols[5].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
 
@@ -102,8 +103,8 @@ def _tcc_blocked_jobs() -> None:
         cols = st.columns([1.2, 2.6, 1.2])
         if cols[0].button(ui.short_job_id(job["job_id"]), key=f"tccb_{job['id']}", type="tertiary"):
             ui.go_to_job(job["id"])
-        cols[1].write(f"{job['client_name'] or '—'} — {job['title']}")
-        cols[2].write(job["owner_name"] or "—")
+        cols[1].write(f"{titlecase_name(job['client_name']) or '—'} — {job['title']}")
+        cols[2].write(titlecase_name(job["owner_name"]) or "—")
         names = ", ".join(f"{o['job_id']} ({o['status']})" for o in outstanding)
         st.caption(f"Waiting on: {names}")
 

@@ -9,11 +9,11 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import RISK_AMBER, RISK_RED
+from core.constants import RISK_AMBER, RISK_RED, titlecase_name
 
 
 def render(user: dict) -> None:
-    ui.page_header(f"Good to see you, {user['name'].split()[0]}", "Log requests, keep the register straight.")
+    ui.page_header(f"Good to see you, {titlecase_name(user['name']).split()[0]}", "Log requests, keep the register straight.")
 
     st.info("Nothing is worked until it's logged. Use **Capture** in the sidebar to log a request in seconds.")
     ui.risk_legend()

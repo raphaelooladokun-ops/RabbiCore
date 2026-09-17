@@ -29,6 +29,7 @@ from core.constants import (
     STATUS_LABELS,
     STATUS_NEW,
     humanize,
+    titlecase_name,
 )
 
 # Every module's custom gate (job_extension.attributes['active_gate']) gets
@@ -170,7 +171,7 @@ def _blocking_alert(job: dict) -> None:
     if not job.get("blocking_count"):
         return
     dependents = models.list_blocked_dependents(job["id"])
-    names = ", ".join(f"{d['job_id']} ({d['owner_name'] or 'unassigned'})" for d in dependents)
+    names = ", ".join(f"{d['job_id']} ({titlecase_name(d['owner_name']) or 'unassigned'})" for d in dependents)
     st.error(f"⛔ Blocking {job['blocking_count']} other job(s) — {names}")
 
 
@@ -180,13 +181,13 @@ def _info(job: dict) -> None:
         if job["client_id"]:
             cc1, cc2 = st.columns([0.9, 3])
             cc1.write("**Client:**")
-            if cc2.button(job["client_name"] or "—", key=f"jd_client_{job['id']}", type="tertiary"):
+            if cc2.button(titlecase_name(job["client_name"]) or "—", key=f"jd_client_{job['id']}", type="tertiary"):
                 ui.go_to_client(job["client_id"])
         else:
-            st.write(f"**Client:** {job['client_name'] or '—'}")
+            st.write(f"**Client:** {titlecase_name(job['client_name']) or '—'}")
         st.write(f"**Service:** {job['service_name'] or '—'}")
         st.write(f"**Category:** {humanize(job['category'], CATEGORY_LABELS)}")
-        st.write(f"**Owner:** {job['owner_name'] or '—'}")
+        st.write(f"**Owner:** {titlecase_name(job['owner_name']) or '—'}")
         st.write(f"**Source:** {humanize(job['source'], SOURCE_LABELS)}")
     with c2:
         st.write(f"**Logged:** {job['created_at'].strftime('%d %b %Y')}")
@@ -584,7 +585,7 @@ def _edit_job_code_control(job: dict, key_prefix: str, user: dict) -> None:
             st.caption("Edit history:")
             for e in edits:
                 st.caption(
-                    f"{e['old_code']} → {e['new_code']} — {e['changed_by_name'] or '—'}, "
+                    f"{e['old_code']} → {e['new_code']} — {titlecase_name(e['changed_by_name']) or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
 
@@ -616,7 +617,7 @@ def _edit_job_details_control(job: dict, key_prefix: str, user: dict) -> None:
             for e in edits:
                 st.caption(
                     f"{e['field'].capitalize()}: {e['old_value'] or '—'} → {e['new_value'] or '—'} — "
-                    f"{e['changed_by_name'] or '—'}, {e['changed_at'].strftime('%d %b %Y, %H:%M')}"
+                    f"{titlecase_name(e['changed_by_name']) or '—'}, {e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
 
 
@@ -743,7 +744,7 @@ def _expenses(job: dict, user: dict) -> None:
             cols[0].write(e["description"])
             cols[1].write(f"₦{float(e['amount']):,.2f}")
             cols[2].write(e["expense_date"].isoformat())
-            cols[3].write(e["created_by_name"] or "—")
+            cols[3].write(titlecase_name(e["created_by_name"]) or "—")
             total += float(e["amount"])
         st.caption(f"Total logged: ₦{total:,.2f}")
     else:
@@ -785,7 +786,7 @@ def _comments(job: dict, user: dict, *, locked: bool = False) -> None:
     if not comments:
         st.caption("No comments yet.")
     for c in comments:
-        st.markdown(f"**{c['author_name']}** · {c['created_at'].strftime('%d %b %Y, %H:%M')}")
+        st.markdown(f"**{titlecase_name(c['author_name'])}** · {c['created_at'].strftime('%d %b %Y, %H:%M')}")
         st.write(c["body"])
         st.divider()
 

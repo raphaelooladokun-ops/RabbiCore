@@ -22,6 +22,7 @@ from core.constants import (
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
     humanize,
+    titlecase_name,
 )
 
 
@@ -51,7 +52,7 @@ def render(user: dict, invoice_pk: int) -> None:
     _document_header(invoice, total)
 
     if invoice["status"] == "rejected":
-        st.warning(f"**Rejected by {invoice['rejected_by_name'] or '—'}:** {invoice['rejection_reason']}")
+        st.warning(f"**Rejected by {titlecase_name(invoice['rejected_by_name']) or '—'}:** {invoice['rejection_reason']}")
 
     editable_by_principal = (
         user["role"] in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and invoice["status"] == "pending_approval"
@@ -166,7 +167,7 @@ def _remove_approval_control(invoice: dict, user: dict) -> None:
             st.caption("Un-approval history:")
             for h in history:
                 st.caption(
-                    f"{h['actor_name'] or '—'}, {h['created_at'].strftime('%d %b %Y, %H:%M')} — {h['reason']}"
+                    f"{titlecase_name(h['actor_name']) or '—'}, {h['created_at'].strftime('%d %b %Y, %H:%M')} — {h['reason']}"
                 )
 
 
@@ -195,7 +196,7 @@ def _edit_invoice_code_control(invoice: dict, user: dict) -> None:
             st.caption("Edit history:")
             for e in edits:
                 st.caption(
-                    f"{e['old_code']} → {e['new_code']} — {e['changed_by_name'] or '—'}, "
+                    f"{e['old_code']} → {e['new_code']} — {titlecase_name(e['changed_by_name']) or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
 
@@ -210,17 +211,17 @@ def _document_header(invoice: dict, total: float) -> None:
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Bill to**")
-            st.write(invoice["client_name"])
+            st.write(titlecase_name(invoice["client_name"]))
             if invoice["client_contact_name"]:
-                st.caption(invoice["client_contact_name"])
+                st.caption(titlecase_name(invoice["client_contact_name"]))
             if invoice["client_contact_email"]:
                 st.caption(invoice["client_contact_email"])
         with c2:
             st.markdown("**Invoice details**")
             st.write(f"Date: {invoice['invoice_date'].isoformat()}")
-            st.write(f"Submitted by: {invoice['created_by_name'] or '—'}")
+            st.write(f"Submitted by: {titlecase_name(invoice['created_by_name']) or '—'}")
             if invoice["approved_by_name"]:
-                st.write(f"Approved by: {invoice['approved_by_name']}")
+                st.write(f"Approved by: {titlecase_name(invoice['approved_by_name'])}")
         st.markdown(f"### Total: ₦{total:,.2f}")
     st.write("")
 

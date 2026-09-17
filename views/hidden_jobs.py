@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import CATEGORY_LABELS, STATUS_LABELS_SHORT, humanize
+from core.constants import CATEGORY_LABELS, STATUS_LABELS_SHORT, humanize, titlecase_name
 
 _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.6, 1.1, 1.3]
 _HEADERS = ["Job ID", "Client", "What", "Category", "Status", "Hidden", "", ""]
@@ -30,7 +30,7 @@ def render(user: dict) -> None:
     for j in jobs:
         cols = st.columns(_ROW_WIDTHS)
         cols[0].write(ui.short_job_id(j["job_id"]))
-        cols[1].write(j.get("client_name") or "—")
+        cols[1].write(titlecase_name(j.get("client_name")) or "—")
         cols[2].write(j["title"])
         cols[3].write(humanize(j["category"], CATEGORY_LABELS))
         cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))

@@ -25,6 +25,7 @@ from core.constants import (
     STATUS_LABELS_SHORT,
     STATUSES_IN_ORDER,
     humanize,
+    titlecase_name,
 )
 
 RISK_ORDER = {RISK_RED: 0, RISK_AMBER: 1, RISK_GREY: 2, RISK_GREEN: 3}
@@ -89,7 +90,10 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
         )
     with col2:
         clients = sorted({j["client_name"] for j in jobs if j["client_name"]})
-        client_choice = st.selectbox("Client", options=["All clients"] + clients, key=f"{key_prefix}_f_client")
+        client_choice = st.selectbox(
+            "Client", options=["All clients"] + clients, key=f"{key_prefix}_f_client",
+            format_func=lambda v: v if v == "All clients" else titlecase_name(v),
+        )
     with col3:
         categories = sorted({j["category"] for j in jobs})
         cat_labels = ["All"] + [humanize(c, CATEGORY_LABELS) for c in categories]
@@ -98,7 +102,10 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
         owners = sorted({j["owner_name"] for j in jobs if j["owner_name"]})
         owner_choice = "All owners"
         if not only_own:
-            owner_choice = st.selectbox("Owner", options=["All owners"] + owners, key=f"{key_prefix}_f_owner")
+            owner_choice = st.selectbox(
+                "Owner", options=["All owners"] + owners, key=f"{key_prefix}_f_owner",
+                format_func=lambda v: v if v == "All owners" else titlecase_name(v),
+            )
 
     search = st.text_input("Search job ID, title or client", key=f"{key_prefix}_f_search")
     show_dismissed = st.checkbox("Show dismissed items", value=False, key=f"{key_prefix}_f_dismissed")
@@ -174,12 +181,12 @@ def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
         if cols[2].button(ui.short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
         if j.get("client_id") and j.get("client_name"):
-            if cols[3].button(j["client_name"], key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
+            if cols[3].button(titlecase_name(j["client_name"]), key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
                 ui.go_to_client(j["client_id"])
         else:
-            cols[3].write(j.get("client_name") or "—")
+            cols[3].write(titlecase_name(j.get("client_name")) or "—")
         cols[4].write(j["title"])
-        cols[5].write(j.get("owner_name") or "—")
+        cols[5].write(titlecase_name(j.get("owner_name")) or "—")
         cols[6].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[7].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
 

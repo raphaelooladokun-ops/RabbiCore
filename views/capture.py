@@ -15,6 +15,7 @@ from core.constants import (
     SOURCE_TEAM_GROUP_FORWARD,
     STATUS_LABELS_SHORT,
     humanize,
+    titlecase_name,
 )
 from core.seed_data import PILLAR_TO_CATEGORY
 
@@ -58,6 +59,7 @@ def _job_form(user: dict) -> None:
         client_name = st.selectbox(
             "Client *", options=[NEW_CLIENT_OPTION] + list(client_map.keys()), index=None,
             placeholder="Select client…", key="cap_client",
+            format_func=lambda v: v if v == NEW_CLIENT_OPTION else titlecase_name(v),
         )
     with col2:
         service_name = st.selectbox(
@@ -157,7 +159,7 @@ def _job_form(user: dict) -> None:
         st.warning(
             f"⚠️ This job may already exist — {ui.short_job_id(duplicate['job_id'])} "
             f"({STATUS_LABELS_SHORT.get(duplicate['status'], humanize(duplicate['status']))}), "
-            f"owned by {duplicate['owner_name'] or '—'}, logged {duplicate['created_at'].strftime('%d %b %Y')}."
+            f"owned by {titlecase_name(duplicate['owner_name']) or '—'}, logged {duplicate['created_at'].strftime('%d %b %Y')}."
         )
         log_anyway = st.checkbox("Log anyway — this is a separate, genuine request", key="cap_loganyway")
 
@@ -220,7 +222,8 @@ def _dismiss_form(user: dict) -> None:
     no_client = "— not linked to a client —"
 
     client_name = st.selectbox(
-        "Client (optional)", options=[no_client] + list(client_map.keys()), key="dis_client"
+        "Client (optional)", options=[no_client] + list(client_map.keys()), key="dis_client",
+        format_func=lambda v: v if v == no_client else titlecase_name(v),
     )
     description = st.text_area(
         "What was this about?", placeholder="Short summary of the message or request", key="dis_description"

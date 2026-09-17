@@ -17,6 +17,7 @@ from core.constants import (
     ROLE_SUPER_ADMIN,
     STATUS_LABELS_SHORT,
     humanize,
+    titlecase_name,
 )
 
 _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.3]
@@ -53,9 +54,9 @@ def _ready_to_invoice() -> None:
         cols = st.columns(_ROW_WIDTHS)
         if cols[0].button(ui.short_job_id(j["job_id"]), key=f"readyjob_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
-        cols[1].write(j["client_name"] or "—")
+        cols[1].write(titlecase_name(j["client_name"]) or "—")
         cols[2].write(j["title"])
-        cols[3].write(j["owner_name"] or "—")
+        cols[3].write(titlecase_name(j["owner_name"]) or "—")
         cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         if cols[5].button("Create invoice", key=f"readyinv_{j['id']}"):
             st.session_state["invoice_seed_job"] = j["id"]
@@ -76,14 +77,14 @@ def _invoices_list() -> None:
             status_label = humanize(inv["status"], INVOICE_STATUS_LABELS)
             total = models.invoice_total(inv["id"])
             if st.button(
-                f"{inv['invoice_code']} — {inv['client_name']} · {status_label} · ₦{total:,.2f}",
+                f"{inv['invoice_code']} — {titlecase_name(inv['client_name'])} · {status_label} · ₦{total:,.2f}",
                 key=f"openinv_{inv['id']}", type="tertiary",
             ):
                 ui.go_to_invoice(inv["id"])
 
-            trail = f"Submitted by {inv['created_by_name'] or '—'}"
+            trail = f"Submitted by {titlecase_name(inv['created_by_name']) or '—'}"
             if inv["approved_by_name"]:
-                trail += f" · Approved by {inv['approved_by_name']}"
+                trail += f" · Approved by {titlecase_name(inv['approved_by_name'])}"
             elif inv["status"] == "rejected":
-                trail += f" · Rejected by {inv['rejected_by_name'] or '—'}"
+                trail += f" · Rejected by {titlecase_name(inv['rejected_by_name']) or '—'}"
             st.caption(trail)

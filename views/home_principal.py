@@ -8,14 +8,14 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import RISK_RED, STATUS_LABELS_SHORT, humanize
+from core.constants import RISK_RED, STATUS_LABELS_SHORT, humanize, titlecase_name
 
 STATUS_ORDER = ["new", "in_progress", "blocked", "done", "closed"]
 STATUS_FILTER_KEY = "principal_status_filter"
 
 
 def render(user: dict) -> None:
-    ui.page_header(f"Good to see you, {user['name'].split()[0]}", "Firm-wide oversight — every job, every client.")
+    ui.page_header(f"Good to see you, {titlecase_name(user['name']).split()[0]}", "Firm-wide oversight — every job, every client.")
     ui.risk_legend()
 
     summary = models.firm_summary()

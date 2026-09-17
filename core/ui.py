@@ -20,6 +20,7 @@ from core.constants import (
     SOURCE_LABELS,
     STATUS_LABELS_SHORT,
     humanize,
+    titlecase_name,
 )
 
 NAV_JOB_KEY = "nav_job_pk"
@@ -61,15 +62,17 @@ def staff_label(s: dict) -> str:
     Plain text: selectbox options don't render markdown, so this is what
     every dropdown built from this label should use. For text rendered
     through st.write/st.markdown/st.warning, use staff_label_md instead —
-    a bare email there would otherwise auto-link as a mailto: address."""
-    return f"{s['name']} ({s['email']})"
+    a bare email there would otherwise auto-link as a mailto: address.
+    The name is Title Cased for display (see titlecase_name) — the email
+    never is, since it's a login identifier, not a name."""
+    return f"{titlecase_name(s['name'])} ({s['email']})"
 
 
 def staff_label_md(s: dict) -> str:
     """Markdown-safe variant of staff_label for st.write/st.markdown/
     st.warning contexts — backtick-wraps the email so Streamlit's markdown
     renderer can't turn it into a clickable mailto: link."""
-    return f"{s['name']} (`{s['email']}`)"
+    return f"{titlecase_name(s['name'])} (`{s['email']}`)"
 
 
 def risk_legend() -> None:
@@ -234,12 +237,12 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
         if cols[1].button(short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
             go_to_job(j["id"])
         if j.get("client_id") and j.get("client_name"):
-            if cols[2].button(j["client_name"], key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
+            if cols[2].button(titlecase_name(j["client_name"]), key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
                 go_to_client(j["client_id"])
         else:
-            cols[2].write(j.get("client_name") or "—")
+            cols[2].write(titlecase_name(j.get("client_name")) or "—")
         cols[3].write(j["title"])
-        cols[4].write(j.get("owner_name") or "—")
+        cols[4].write(titlecase_name(j.get("owner_name")) or "—")
         cols[5].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[6].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
         if j.get("invoice_code"):

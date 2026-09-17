@@ -26,6 +26,7 @@ from core.constants import (
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
     ROLE_SUPER_ADMIN,
+    titlecase_name,
 )
 
 _CREATABLE_ROLES = [ROLE_PRINCIPAL, ROLE_MANAGER, ROLE_ADMIN, ROLE_SPECIALIST]
@@ -59,11 +60,11 @@ def _credentials_banner() -> None:
     with st.container(border=True):
         if creds.get("kind") == "reset":
             st.success(
-                f"**{creds['name']}**'s password has been reset — copy the new one now, it won't be shown again. "
+                f"**{titlecase_name(creds['name'])}**'s password has been reset — copy the new one now, it won't be shown again. "
                 "Their old password no longer works."
             )
         else:
-            st.success(f"**{creds['name']}**'s login is ready — copy these now, they won't be shown again.")
+            st.success(f"**{titlecase_name(creds['name'])}**'s login is ready — copy these now, they won't be shown again.")
         c1, c2 = st.columns(2)
         with c1:
             st.caption("Username")
@@ -155,7 +156,7 @@ def _users_list(user: dict) -> None:
     for s in staff:
         cols = st.columns(_ROW_WIDTHS)
         cols[0].write(f"`{s['email']}`")
-        cols[1].write(s["name"])
+        cols[1].write(titlecase_name(s["name"]))
         cols[2].write(ROLE_LABELS.get(s["role"], s["role"]))
         specialities = categories_by_staff.get(s["id"], [])
         cols[3].write(", ".join(CATEGORY_LABELS.get(c, c) for c in specialities) if specialities else "—")
@@ -171,12 +172,12 @@ def _users_list(user: dict) -> None:
             if s["active"]:
                 if cols[7].button("Deactivate", key=f"deact_{s['id']}"):
                     models.set_staff_active(s["id"], False)
-                    st.toast(f"{s['name']} deactivated.", icon="✅")
+                    st.toast(f"{titlecase_name(s['name'])} deactivated.", icon="✅")
                     st.rerun()
             else:
                 if cols[7].button("Reactivate", key=f"react_{s['id']}"):
                     models.set_staff_active(s["id"], True)
-                    st.toast(f"{s['name']} reactivated.", icon="✅")
+                    st.toast(f"{titlecase_name(s['name'])} reactivated.", icon="✅")
                     st.rerun()
 
             if cols[8].button("Reset password", key=f"reset_{s['id']}"):
@@ -197,7 +198,7 @@ def _users_list(user: dict) -> None:
             if st.session_state.get(confirm_key):
                 with st.container(border=True):
                     st.warning(
-                        f"Permanently delete **{s['name']}**? This is the harder, permanent action — "
+                        f"Permanently delete **{titlecase_name(s['name'])}**? This is the harder, permanent action — "
                         "it cannot be undone. Deactivate instead to keep the record but block their login."
                     )
                     c1, c2 = st.columns(2)
@@ -208,7 +209,7 @@ def _users_list(user: dict) -> None:
                             st.error(str(e))
                         else:
                             st.session_state.pop(confirm_key, None)
-                            st.toast(f"{s['name']} permanently deleted.", icon="✅")
+                            st.toast(f"{titlecase_name(s['name'])} permanently deleted.", icon="✅")
                             st.rerun()
                     if c2.button("Cancel", key=f"canceldel_{s['id']}"):
                         st.session_state.pop(confirm_key, None)

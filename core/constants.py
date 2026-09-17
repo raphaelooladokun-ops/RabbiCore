@@ -3,6 +3,8 @@ every screen agrees on what things are called and what colour they are."""
 
 from __future__ import annotations
 
+import re
+
 # ---------------------------------------------------------------------------
 # Roles
 # ---------------------------------------------------------------------------
@@ -149,6 +151,63 @@ MULTI_SUBJECT_SERVICE_CODES = {
     "IMM-ECERPAC-DEP-SPOUSE",
     "IMM-ECERPAC-DEP-CHILD",
 }
+
+
+# ---------------------------------------------------------------------------
+# Display-only Title Case for client/company/user names — the data is
+# always stored exactly as entered (see e.g. models.update_client_name);
+# this only ever touches what a screen renders, never what's in the
+# database, so nothing is lost by applying it and nothing is broken by
+# not applying it somewhere. Kept out of the model layer entirely: name
+# matching (duplicate detection, bulk-import matching against an existing
+# client), audit-trail entries, and generated documents (the invoice PDF)
+# all need the exact stored casing, not a reformatted one.
+# ---------------------------------------------------------------------------
+_VOWELS = set("AEIOU")
+
+# Short, real-world acronyms that would otherwise look like ordinary words
+# once a vowel is involved (e.g. "ECVL" contains a vowel, so the no-vowel
+# heuristic below can't catch it on its own). Deliberately conservative —
+# left out anything that could collide with a genuine English word (e.g.
+# "SON" is also just the word "son").
+_KNOWN_ACRONYMS = {
+    "RGPL", "ECVL", "MTN", "CAC", "FIRS", "NAFDAC", "CBN", "DPR", "NPC",
+    "EFCC", "ICPC", "JAMB", "WAEC", "NECO", "NYSC", "BVN", "NIN", "TIN",
+    "PLC", "LLC", "NGO", "NNPC", "FCT", "FZE", "NIS",
+}
+
+
+def titlecase_name(value: str | None) -> str:
+    """First letter of each word capitalised, rest lowercase — except a
+    token that looks like an acronym (on the known list above, or a short
+    all-caps run of letters with no vowel — RGPL, MTN, ...) stays exactly
+    as typed. A normal word that merely happens to be in capitals (CHEM,
+    LIMITED) has a vowel in a normal place, so it title-cases as usual:
+    'ALTIUS CHEM LIMITED' -> 'Altius Chem Limited', but 'RGPL' stays
+    'RGPL'. Case is judged per word, so an acronym embedded in a longer
+    name (e.g. 'RGPL Nigeria Limited') is preserved in place."""
+    if not value:
+        return value or ""
+    tokens = re.split(r"(\s+)", value)
+    out = []
+    for token in tokens:
+        if token == "" or token.isspace():
+            out.append(token)
+            continue
+        letters_only = "".join(ch for ch in token if ch.isalpha())
+        if not letters_only:
+            out.append(token)
+            continue
+        if letters_only.upper() in _KNOWN_ACRONYMS:
+            out.append(token.upper())
+            continue
+        is_all_caps = letters_only.isupper()
+        has_vowel = any(ch in _VOWELS for ch in letters_only.upper())
+        if is_all_caps and len(letters_only) <= 5 and not has_vowel:
+            out.append(token)
+        else:
+            out.append(token.title())
+    return "".join(out)
 
 
 def humanize(value: str, mapping: dict | None = None) -> str:

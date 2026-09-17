@@ -8,12 +8,12 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import RISK_AMBER, RISK_RED, STATUS_IN_PROGRESS
+from core.constants import RISK_AMBER, RISK_RED, STATUS_IN_PROGRESS, titlecase_name
 from views import register
 
 
 def render(user: dict) -> None:
-    ui.page_header(f"Good to see you, {user['name'].split()[0]}", "Jobs assigned to you — never a loose message.")
+    ui.page_header(f"Good to see you, {titlecase_name(user['name']).split()[0]}", "Jobs assigned to you — never a loose message.")
 
     jobs = models.list_jobs(owner_id=user["id"], exclude_dismissed=True)
     c1, c2, c3, c4 = st.columns(4)

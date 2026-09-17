@@ -11,7 +11,7 @@ import streamlit as st
 
 from core import immigration, models
 from core import ui
-from core.constants import ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN
+from core.constants import ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, titlecase_name
 from views import register as register_view
 
 _URGENCY_ICON = {"expired": "🔴", "due": "🟠", "approaching": "🟡"}
@@ -51,9 +51,9 @@ def _upcoming_expiries() -> None:
         row_cols[0].write(_URGENCY_ICON[urgency])
         if row_cols[1].button(ui.short_job_id(r["job_code"]), key=f"exp_{r['job_document_id']}", type="tertiary"):
             ui.go_to_job(r["job_pk"])
-        row_cols[2].write(f"{r['document_name']} — {r['client_name'] or '—'}")
+        row_cols[2].write(f"{r['document_name']} — {titlecase_name(r['client_name']) or '—'}")
         row_cols[3].write(r["title"])
-        row_cols[4].write(r["owner_name"] or "—")
+        row_cols[4].write(titlecase_name(r["owner_name"]) or "—")
         row_cols[5].write(f"{models.EXPIRY_URGENCY_LABELS[urgency]} · {r['expiry_date'].isoformat()}")
 
 
@@ -69,13 +69,13 @@ def _quota_blocked_jobs() -> None:
         cols = st.columns([1.2, 2.6, 1.8, 1.2])
         if cols[0].button(ui.short_job_id(job["job_id"]), key=f"qb_{job['id']}", type="tertiary"):
             ui.go_to_job(job["id"])
-        cols[1].write(f"{job['client_name'] or '—'} — {job['title']}")
+        cols[1].write(f"{titlecase_name(job['client_name']) or '—'} — {job['title']}")
         if quota:
             if cols[2].button(f"Quota: {ui.short_job_id(quota['job_id'])}", key=f"qbq_{job['id']}", type="tertiary"):
                 ui.go_to_job(quota["id"])
         else:
             cols[2].write("—")
-        cols[3].write(job["owner_name"] or "—")
+        cols[3].write(titlecase_name(job["owner_name"]) or "—")
 
 
 def _specialist_assignment() -> None:

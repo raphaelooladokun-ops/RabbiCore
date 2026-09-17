@@ -7,14 +7,14 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import CATEGORY_LABELS, STATUS_LABELS, humanize
+from core.constants import CATEGORY_LABELS, STATUS_LABELS, humanize, titlecase_name
 
 
 def render(user: dict) -> None:
     client = models.get_client(user["client_id"]) if user["client_id"] else None
-    client_name = client["name"] if client else "your account"
+    client_name = titlecase_name(client["name"]) if client else "your account"
 
-    ui.page_header(f"Welcome, {user['name'].split()[0]}", f"Where things stand for {client_name}.")
+    ui.page_header(f"Welcome, {titlecase_name(user['name']).split()[0]}", f"Where things stand for {client_name}.")
 
     if not client:
         st.warning("Your account isn't linked to a client yet. Contact Rabbi Consult.")

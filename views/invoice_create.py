@@ -12,6 +12,7 @@ import streamlit as st
 
 from core import models
 from core import ui
+from core.constants import titlecase_name
 
 
 def render(user: dict) -> None:
@@ -40,7 +41,7 @@ def render(user: dict) -> None:
         st.error("No client selected for this invoice. Start from a job's detail page or from Billing.")
         return
 
-    ui.page_header("Create invoice", f"For {client['name']}")
+    ui.page_header("Create invoice", f"For {titlecase_name(client['name'])}")
     _builder(user, client, preselect_job_id=seed_job["id"] if seed_job else None)
 
 
@@ -50,9 +51,9 @@ def _render_revise(user: dict, invoice_id: int) -> None:
         st.error("Invoice not found.")
         return
     client = models.get_client(invoice["client_id"])
-    ui.page_header("Revise invoice", f"{invoice['invoice_code']} — {client['name']}")
+    ui.page_header("Revise invoice", f"{invoice['invoice_code']} — {titlecase_name(client['name'])}")
     if invoice["rejection_reason"]:
-        st.warning(f"**Rejected by {invoice['rejected_by_name'] or 'the principal'}:** {invoice['rejection_reason']}")
+        st.warning(f"**Rejected by {titlecase_name(invoice['rejected_by_name']) or 'the principal'}:** {invoice['rejection_reason']}")
     _builder(user, client, invoice=invoice)
 
 
@@ -65,7 +66,7 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
         client["id"], invoice_id=invoice["id"] if revising else None
     )
     if not jobs:
-        st.caption(f"No unbilled jobs for {client['name']}.")
+        st.caption(f"No unbilled jobs for {titlecase_name(client['name'])}.")
         return
 
     st.markdown("#### Jobs on this invoice")

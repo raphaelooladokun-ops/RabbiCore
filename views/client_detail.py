@@ -12,7 +12,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN
+from core.constants import ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, titlecase_name
 
 
 def render(user: dict, client_pk: int) -> None:
@@ -23,7 +23,7 @@ def render(user: dict, client_pk: int) -> None:
         st.error("That client no longer exists.")
         return
 
-    ui.page_header(client["name"], "Company details and jobs on file.")
+    ui.page_header(titlecase_name(client["name"]), "Company details and jobs on file.")
 
     _edit_name_control(client, user)
     st.divider()
@@ -52,7 +52,7 @@ def _edit_name_control(client: dict, user: dict) -> None:
             st.caption("Edit history:")
             for e in edits:
                 st.caption(
-                    f"{e['old_value']} → {e['new_value']} — {e['changed_by_name'] or '—'}, "
+                    f"{e['old_value']} → {e['new_value']} — {titlecase_name(e['changed_by_name']) or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
 
@@ -62,7 +62,7 @@ def _contact_info(client: dict) -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.write(f"**RC number:** {client.get('rc_number') or '—'}")
-        st.write(f"**Contact name:** {client.get('contact_name') or '—'}")
+        st.write(f"**Contact name:** {titlecase_name(client.get('contact_name')) or '—'}")
     with c2:
         st.write(f"**Contact email:** {client.get('contact_email') or '—'}")
         st.write(f"**Contact phone:** {client.get('contact_phone') or '—'}")
