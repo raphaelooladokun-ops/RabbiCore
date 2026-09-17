@@ -336,6 +336,27 @@ CREATE TABLE IF NOT EXISTS code_edit_log (
 CREATE INDEX IF NOT EXISTS idx_code_edit_log_entity ON code_edit_log(entity_type, entity_id, changed_at DESC);
 
 -- ---------------------------------------------------------------------------
+-- FIELD EDIT LOG — a general "who changed what, when" trail for the
+-- editable name/description fields (job title/description, staff name,
+-- client/company name) EC/super_admin/admin/manager can correct. Separate
+-- from code_edit_log above since a code edit always replaces one whole
+-- value with another, while these fields carry a more open-ended set of
+-- names across three different entity types.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS field_edit_log (
+    id              SERIAL PRIMARY KEY,
+    entity_type     TEXT NOT NULL CHECK (entity_type IN ('job', 'client', 'staff')),
+    entity_id       INTEGER NOT NULL,
+    field           TEXT NOT NULL,
+    old_value       TEXT,
+    new_value       TEXT,
+    changed_by      INTEGER REFERENCES staff(id),
+    changed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_field_edit_log_entity ON field_edit_log(entity_type, entity_id, changed_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- STATUS GUARD — the rules the brief says the system must enforce, kept in
 -- the database so no future module or UI can bypass them:
 --   1. A job cannot become 'closed' without an invoice, and that invoice

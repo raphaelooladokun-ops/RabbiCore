@@ -173,7 +173,11 @@ def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
         cols[1].write(RISK_EMOJI[models.compute_risk(j)])
         if cols[2].button(ui.short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
-        cols[3].write(j.get("client_name") or "—")
+        if j.get("client_id") and j.get("client_name"):
+            if cols[3].button(j["client_name"], key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
+                ui.go_to_client(j["client_id"])
+        else:
+            cols[3].write(j.get("client_name") or "—")
         cols[4].write(j["title"])
         cols[5].write(j.get("owner_name") or "—")
         cols[6].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))

@@ -1032,6 +1032,91 @@ def list_code_edits(entity_type: str, entity_id: int) -> list:
     )
 
 
+class FieldEditError(Exception):
+    pass
+
+
+def _log_field_edit(
+    entity_type: str, entity_id: int, field: str, old_value: str | None, new_value: str | None,
+    actor_id: int | None,
+) -> None:
+    execute(
+        "INSERT INTO field_edit_log (entity_type, entity_id, field, old_value, new_value, changed_by) "
+        "VALUES (%s, %s, %s, %s, %s, %s)",
+        (entity_type, entity_id, field, old_value, new_value, actor_id),
+    )
+
+
+def update_job_details(
+    job_pk: int, *, title: str | None = None, description: str | None = None, actor_id: int | None = None,
+) -> None:
+    """EC/admin/manager/super_admin: correct a job's title and/or
+    description. Only fields actually passed are touched; each changed
+    field gets its own field_edit_log row so the trail reads as plain
+    English (title changed from X to Y) rather than one opaque row."""
+    job = get_job(job_pk)
+    if not job:
+        raise FieldEditError("Job not found.")
+
+    if title is not None:
+        title = title.strip()
+        if not title:
+            raise FieldEditError("Job title can't be blank.")
+        if title != job["title"]:
+            execute("UPDATE job SET title = %s WHERE id = %s", (title, job_pk))
+            _log_field_edit("job", job_pk, "title", job["title"], title, actor_id)
+
+    if description is not None:
+        description = description.strip() or None
+        if description != job["description"]:
+            execute("UPDATE job SET description = %s WHERE id = %s", (description, job_pk))
+            _log_field_edit("job", job_pk, "description", job["description"], description, actor_id)
+
+
+def update_staff_name(staff_pk: int, new_name: str, actor_id: int | None = None) -> None:
+    """EC/admin/manager/super_admin: correct a staff member's display
+    name (e.g. a typo or a legal name change) — their login username is
+    untouched, so this never affects how they sign in."""
+    new_name = new_name.strip()
+    if not new_name:
+        raise FieldEditError("Name can't be blank.")
+    staff = get_staff(staff_pk)
+    if not staff:
+        raise FieldEditError("User not found.")
+    if new_name == staff["name"]:
+        return
+    execute("UPDATE staff SET name = %s WHERE id = %s", (new_name, staff_pk))
+    _log_field_edit("staff", staff_pk, "name", staff["name"], new_name, actor_id)
+
+
+def update_client_name(client_pk: int, new_name: str, actor_id: int | None = None) -> None:
+    """EC/admin/manager/super_admin: correct a company/client's name. The
+    client table is the single source of truth — every job, invoice and
+    register row reads it live via client_id — so this one update is all
+    it takes to change the name everywhere it's shown."""
+    new_name = new_name.strip()
+    if not new_name:
+        raise FieldEditError("Company name can't be blank.")
+    client = get_client(client_pk)
+    if not client:
+        raise FieldEditError("Client not found.")
+    if new_name == client["name"]:
+        return
+    if query_one("SELECT 1 FROM client WHERE lower(name) = lower(%s) AND id <> %s", (new_name, client_pk)):
+        raise FieldEditError(f"A client named '{new_name}' already exists.")
+    execute("UPDATE client SET name = %s WHERE id = %s", (new_name, client_pk))
+    _log_field_edit("client", client_pk, "name", client["name"], new_name, actor_id)
+
+
+def list_field_edits(entity_type: str, entity_id: int) -> list:
+    return query(
+        "SELECT l.*, s.name AS changed_by_name FROM field_edit_log l "
+        "LEFT JOIN staff s ON s.id = l.changed_by "
+        "WHERE l.entity_type = %s AND l.entity_id = %s ORDER BY l.changed_at DESC",
+        (entity_type, entity_id),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-job expense log — admin adds, principal can view. A running list, not
 # accounting.

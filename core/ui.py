@@ -25,6 +25,7 @@ from core.constants import (
 NAV_JOB_KEY = "nav_job_pk"
 NAV_INVOICE_KEY = "nav_invoice_pk"
 NAV_CREATE_INVOICE_KEY = "nav_create_invoice"
+NAV_CLIENT_KEY = "nav_client_pk"
 
 CSS_PATH = Path(__file__).parent.parent / "assets" / "style.css"
 
@@ -127,6 +128,14 @@ def go_to_create_invoice() -> None:
     st.rerun()
 
 
+def go_to_client(client_pk: int) -> None:
+    """Navigate to the client/company detail page — the one place a client
+    name, everywhere it's referenced, converges on."""
+    clear_all_nav()
+    st.session_state[NAV_CLIENT_KEY] = client_pk
+    st.rerun()
+
+
 def clear_job_nav() -> None:
     st.session_state[NAV_JOB_KEY] = None
 
@@ -140,6 +149,7 @@ def clear_all_nav() -> None:
     st.session_state[NAV_JOB_KEY] = None
     st.session_state[NAV_INVOICE_KEY] = None
     st.session_state[NAV_CREATE_INVOICE_KEY] = False
+    st.session_state[NAV_CLIENT_KEY] = None
     # Bump so any open popover (e.g. the notification bell) gets a fresh
     # widget identity and defaults closed — Streamlit doesn't auto-close a
     # popover just because a click inside it triggered a rerun that swapped
@@ -148,7 +158,7 @@ def clear_all_nav() -> None:
     st.session_state["_nav_epoch"] = st.session_state.get("_nav_epoch", 0) + 1
 
 
-_NAV_QUERY_KEYS = ("p", "j", "i", "ci")
+_NAV_QUERY_KEYS = ("p", "j", "i", "ci", "c")
 
 
 def sync_nav_query_params() -> None:
@@ -161,6 +171,7 @@ def sync_nav_query_params() -> None:
         "j": st.session_state.get(NAV_JOB_KEY),
         "i": st.session_state.get(NAV_INVOICE_KEY),
         "ci": "1" if st.session_state.get(NAV_CREATE_INVOICE_KEY) else None,
+        "c": st.session_state.get(NAV_CLIENT_KEY),
     }
     for key in _NAV_QUERY_KEYS:
         value = current[key]
@@ -185,7 +196,7 @@ def restore_nav_from_query_params(page_names: list) -> None:
     if page in page_names:
         st.session_state["_current_page"] = page
 
-    for key, param in ((NAV_JOB_KEY, "j"), (NAV_INVOICE_KEY, "i")):
+    for key, param in ((NAV_JOB_KEY, "j"), (NAV_INVOICE_KEY, "i"), (NAV_CLIENT_KEY, "c")):
         value = st.query_params.get(param)
         if value and value.isdigit():
             st.session_state[key] = int(value)
@@ -222,7 +233,11 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
         cols[0].write(RISK_EMOJI[models.compute_risk(j)])
         if cols[1].button(short_job_id(j["job_id"]), key=f"{key_prefix}_row_{j['id']}", type="tertiary"):
             go_to_job(j["id"])
-        cols[2].write(j.get("client_name") or "—")
+        if j.get("client_id") and j.get("client_name"):
+            if cols[2].button(j["client_name"], key=f"{key_prefix}_client_{j['id']}", type="tertiary"):
+                go_to_client(j["client_id"])
+        else:
+            cols[2].write(j.get("client_name") or "—")
         cols[3].write(j["title"])
         cols[4].write(j.get("owner_name") or "—")
         cols[5].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))

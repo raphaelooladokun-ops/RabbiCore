@@ -26,6 +26,7 @@ from views import (
     bulk_upload,
     capture,
     cit,
+    client_detail,
     hidden_jobs,
     home_admin,
     home_client,
@@ -94,6 +95,7 @@ NAV = {
         ("CIT", cit.render),
         ("Billing", billing.render),
         ("Workload", workload_report.render),
+        ("Users", users.render),
     ],
     ROLE_ADMIN: [
         ("Home", home_admin.render),
@@ -103,6 +105,7 @@ NAV = {
         ("CIT", cit.render),
         ("Billing", billing.render),
         ("Services", services_admin.render),
+        ("Users", users.render),
     ],
     ROLE_SPECIALIST: [
         ("My Queue", home_specialist.render),
@@ -124,6 +127,7 @@ NAV = {
         ("Billing", billing.render),
         ("Workload", workload_report.render),
         ("Services", services_admin.render),
+        ("Users", users.render),
     ],
     # Full access — the union of every other role's environment, so the
     # firm owner can see and act on all of it from one account.
@@ -184,6 +188,7 @@ def main() -> None:
         st.session_state.get(ui.NAV_JOB_KEY)
         or st.session_state.get(ui.NAV_INVOICE_KEY)
         or st.session_state.get(ui.NAV_CREATE_INVOICE_KEY)
+        or st.session_state.get(ui.NAV_CLIENT_KEY)
     )
 
     # Real buttons, not a radio: a click always reruns even when the page is
@@ -219,6 +224,11 @@ def main() -> None:
     nav_job_pk = st.session_state.get(ui.NAV_JOB_KEY)
     if nav_job_pk:
         job_detail.render(user, nav_job_pk)
+        return
+
+    nav_client_pk = st.session_state.get(ui.NAV_CLIENT_KEY)
+    if nav_client_pk:
+        client_detail.render(user, nav_client_pk)
         return
 
     render_fn = dict(pages)[choice]

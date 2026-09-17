@@ -1,9 +1,11 @@
-"""Super-admin-only staff account management: create a real login for a new
-member of staff (with a generated username/password shown once, ready to
-copy and hand over), reset an existing user's password on demand, and
-deactivate/reactivate accounts. Never a hard delete — a deactivated
-account's jobs, comments and invoices stay exactly where they are,
-attributed to them.
+"""Staff account management. Creating a real login (generated username/
+password shown once), resetting a password, deactivating/reactivating and
+merging duplicates stay super_admin-only — those are account-provisioning
+and irreversible actions. EC/admin/manager also reach this page, but only
+to see who has access and correct a name (a typo or legal name change) —
+see _users_list's can_manage_accounts split. Never a hard delete from
+deactivation — a deactivated account's jobs, comments and invoices stay
+exactly where they are, attributed to them.
 
 Passwords are never stored anywhere they could be shown again later —
 bcrypt hashing is one-way by design. "I need working credentials for this
@@ -32,14 +34,22 @@ _CREDENTIALS_KEY = "new_user_credentials"
 
 
 def render(user: dict) -> None:
-    ui.page_header("Users", "Create staff logins and manage who has access.")
+    can_manage_accounts = user["role"] == ROLE_SUPER_ADMIN
+    subtitle = (
+        "Create staff logins and manage who has access."
+        if can_manage_accounts else
+        "See who has access and correct a name if it's wrong."
+    )
+    ui.page_header("Users", subtitle)
 
-    _credentials_banner()
-    _create_user_form()
-    st.divider()
-    _users_list()
-    st.divider()
-    _merge_duplicates_control()
+    if can_manage_accounts:
+        _credentials_banner()
+        _create_user_form()
+        st.divider()
+    _users_list(user)
+    if can_manage_accounts:
+        st.divider()
+        _merge_duplicates_control()
 
 
 def _credentials_banner() -> None:
@@ -117,22 +127,29 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [2.0, 1.2, 0.7, 0.7, 0.5, 0.8, 1.0, 1.1, 0.8]
+_ROW_WIDTHS = [1.8, 1.1, 0.7, 0.7, 0.5, 0.8, 0.9, 0.9, 1.0, 0.7]
 
 
-def _users_list() -> None:
+def _users_list(user: dict) -> None:
     st.markdown("#### All users")
-    st.caption(
-        "Lost or need to hand out a password again? Use **Reset password** — it issues a fresh one "
-        "on the spot; the old one is never stored anywhere it could be looked up later. The "
-        "**Username** column is what they log in with — it tells apart two people who happen to "
-        "share a name."
-    )
+    can_manage_accounts = user["role"] == ROLE_SUPER_ADMIN
+    if can_manage_accounts:
+        st.caption(
+            "Lost or need to hand out a password again? Use **Reset password** — it issues a fresh one "
+            "on the spot; the old one is never stored anywhere it could be looked up later. The "
+            "**Username** column is what they log in with — it tells apart two people who happen to "
+            "share a name."
+        )
+    else:
+        st.caption(
+            "The **Username** column is what they log in with — it tells apart two people who happen "
+            "to share a name. Use **Edit name** to correct a typo or a legal name change."
+        )
     staff = [s for s in models.list_staff(active_only=False) if s["role"] != "client"]
     categories_by_staff = models.list_staff_categories()
 
     header = st.columns(_ROW_WIDTHS)
-    for col, label in zip(header, ["Username", "Name", "Role", "Speciality", "Status", "Created", "", "", ""]):
+    for col, label in zip(header, ["Username", "Name", "Role", "Speciality", "Status", "Created", "", "", "", ""]):
         col.markdown(f"**{label}**")
 
     for s in staff:
@@ -145,57 +162,86 @@ def _users_list() -> None:
         cols[4].write("Active" if s["active"] else "Inactive")
         cols[5].write(s["created_at"].strftime("%d %b %Y, %H:%M") if s.get("created_at") else "—")
 
-        if s["role"] == ROLE_SUPER_ADMIN:
-            cols[6].caption("—")
+        edit_key = f"editname_open_{s['id']}"
+        if cols[6].button("Edit name", key=f"editnamebtn_{s['id']}"):
+            st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+            st.rerun()
+
+        if can_manage_accounts and s["role"] != ROLE_SUPER_ADMIN:
+            if s["active"]:
+                if cols[7].button("Deactivate", key=f"deact_{s['id']}"):
+                    models.set_staff_active(s["id"], False)
+                    st.toast(f"{s['name']} deactivated.", icon="✅")
+                    st.rerun()
+            else:
+                if cols[7].button("Reactivate", key=f"react_{s['id']}"):
+                    models.set_staff_active(s["id"], True)
+                    st.toast(f"{s['name']} reactivated.", icon="✅")
+                    st.rerun()
+
+            if cols[8].button("Reset password", key=f"reset_{s['id']}"):
+                result = models.reset_staff_password(s["id"])
+                st.session_state[_CREDENTIALS_KEY] = {
+                    "kind": "reset",
+                    "name": result["staff"]["name"],
+                    "username": result["staff"]["email"],
+                    "password": result["password"],
+                }
+                st.rerun()
+
+            confirm_key = f"confirm_del_{s['id']}"
+            if cols[9].button("Delete", key=f"del_{s['id']}"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+
+            if st.session_state.get(confirm_key):
+                with st.container(border=True):
+                    st.warning(
+                        f"Permanently delete **{s['name']}**? This is the harder, permanent action — "
+                        "it cannot be undone. Deactivate instead to keep the record but block their login."
+                    )
+                    c1, c2 = st.columns(2)
+                    if c1.button("Yes, delete permanently", key=f"confirmdel_{s['id']}", type="primary"):
+                        try:
+                            models.delete_staff(s["id"])
+                        except models.StaffDeleteError as e:
+                            st.error(str(e))
+                        else:
+                            st.session_state.pop(confirm_key, None)
+                            st.toast(f"{s['name']} permanently deleted.", icon="✅")
+                            st.rerun()
+                    if c2.button("Cancel", key=f"canceldel_{s['id']}"):
+                        st.session_state.pop(confirm_key, None)
+                        st.rerun()
+        else:
             cols[7].caption("—")
             cols[8].caption("—")
-            continue
+            cols[9].caption("—")
 
-        if s["active"]:
-            if cols[6].button("Deactivate", key=f"deact_{s['id']}"):
-                models.set_staff_active(s["id"], False)
-                st.toast(f"{s['name']} deactivated.", icon="✅")
-                st.rerun()
-        else:
-            if cols[6].button("Reactivate", key=f"react_{s['id']}"):
-                models.set_staff_active(s["id"], True)
-                st.toast(f"{s['name']} reactivated.", icon="✅")
-                st.rerun()
-
-        if cols[7].button("Reset password", key=f"reset_{s['id']}"):
-            result = models.reset_staff_password(s["id"])
-            st.session_state[_CREDENTIALS_KEY] = {
-                "kind": "reset",
-                "name": result["staff"]["name"],
-                "username": result["staff"]["email"],
-                "password": result["password"],
-            }
-            st.rerun()
-
-        confirm_key = f"confirm_del_{s['id']}"
-        if cols[8].button("Delete", key=f"del_{s['id']}"):
-            st.session_state[confirm_key] = True
-            st.rerun()
-
-        if st.session_state.get(confirm_key):
+        if st.session_state.get(edit_key):
             with st.container(border=True):
-                st.warning(
-                    f"Permanently delete **{s['name']}**? This is the harder, permanent action — "
-                    "it cannot be undone. Deactivate instead to keep the record but block their login."
-                )
+                new_name = st.text_input("Full name", value=s["name"], key=f"newname_{s['id']}")
                 c1, c2 = st.columns(2)
-                if c1.button("Yes, delete permanently", key=f"confirmdel_{s['id']}", type="primary"):
+                if c1.button("Save name", key=f"savename_{s['id']}", type="primary"):
                     try:
-                        models.delete_staff(s["id"])
-                    except models.StaffDeleteError as e:
+                        models.update_staff_name(s["id"], new_name, actor_id=user["id"])
+                    except models.FieldEditError as e:
                         st.error(str(e))
                     else:
-                        st.session_state.pop(confirm_key, None)
-                        st.toast(f"{s['name']} permanently deleted.", icon="✅")
+                        st.session_state.pop(edit_key, None)
+                        st.toast("Name updated.", icon="✅")
                         st.rerun()
-                if c2.button("Cancel", key=f"canceldel_{s['id']}"):
-                    st.session_state.pop(confirm_key, None)
+                if c2.button("Cancel", key=f"canceleditname_{s['id']}"):
+                    st.session_state.pop(edit_key, None)
                     st.rerun()
+                edits = models.list_field_edits("staff", s["id"])
+                if edits:
+                    st.caption("Edit history:")
+                    for e in edits:
+                        st.caption(
+                            f"{e['old_value']} → {e['new_value']} — {e['changed_by_name'] or '—'}, "
+                            f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
+                        )
 
 
 def _merge_duplicates_control() -> None:

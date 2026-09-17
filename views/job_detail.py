@@ -103,6 +103,8 @@ def render(user: dict, job_pk: int) -> None:
         st.divider()
         _edit_job_code_control(job, key_prefix, user)
         st.divider()
+        _edit_job_details_control(job, key_prefix, user)
+        st.divider()
         _dependency_control(job, key_prefix, user["id"])
         st.divider()
         _notes_editor(job, key_prefix)
@@ -175,7 +177,13 @@ def _blocking_alert(job: dict) -> None:
 def _info(job: dict) -> None:
     c1, c2 = st.columns(2)
     with c1:
-        st.write(f"**Client:** {job['client_name'] or '—'}")
+        if job["client_id"]:
+            cc1, cc2 = st.columns([0.9, 3])
+            cc1.write("**Client:**")
+            if cc2.button(job["client_name"] or "—", key=f"jd_client_{job['id']}", type="tertiary"):
+                ui.go_to_client(job["client_id"])
+        else:
+            st.write(f"**Client:** {job['client_name'] or '—'}")
         st.write(f"**Service:** {job['service_name'] or '—'}")
         st.write(f"**Category:** {humanize(job['category'], CATEGORY_LABELS)}")
         st.write(f"**Owner:** {job['owner_name'] or '—'}")
@@ -578,6 +586,37 @@ def _edit_job_code_control(job: dict, key_prefix: str, user: dict) -> None:
                 st.caption(
                     f"{e['old_code']} → {e['new_code']} — {e['changed_by_name'] or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
+                )
+
+
+def _edit_job_details_control(job: dict, key_prefix: str, user: dict) -> None:
+    """EC (principal)/admin/manager/super_admin: correct this job's title
+    or description — every change is logged (who, when, old -> new)."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        return
+    with st.expander("Edit title / description"):
+        new_title = st.text_input("Title", value=job["title"], key=f"{key_prefix}_edittitle")
+        new_description = st.text_area(
+            "Description", value=job["description"] or "", key=f"{key_prefix}_editdesc",
+        )
+        if st.button("Save changes", key=f"{key_prefix}_savedetails"):
+            try:
+                models.update_job_details(
+                    job["id"], title=new_title, description=new_description, actor_id=user["id"],
+                )
+            except models.FieldEditError as e:
+                st.error(str(e))
+            else:
+                st.toast("Job details updated.", icon="✅")
+                st.rerun()
+
+        edits = models.list_field_edits("job", job["id"])
+        if edits:
+            st.caption("Edit history:")
+            for e in edits:
+                st.caption(
+                    f"{e['field'].capitalize()}: {e['old_value'] or '—'} → {e['new_value'] or '—'} — "
+                    f"{e['changed_by_name'] or '—'}, {e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
 
 
