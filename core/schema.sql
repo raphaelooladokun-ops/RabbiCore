@@ -491,3 +491,30 @@ CREATE TABLE IF NOT EXISTS module_specialist (
 ALTER TABLE module_specialist DROP CONSTRAINT IF EXISTS module_specialist_category_check;
 ALTER TABLE module_specialist ADD CONSTRAINT module_specialist_category_check
     CHECK (category IN ('cac', 'immigration', 'cit', 'state', 'other'));
+
+-- ---------------------------------------------------------------------------
+-- COMPLIANCE ITEM — per-client compliance tracking (CERPAC cards, quota
+-- approvals, tax clearance certificates, ...) independent of any specific
+-- job, so an expiring item is never missed just because no job happens to
+-- be open for it right now. Urgency is always computed from expiry_date at
+-- read time (see models.compliance_item_status), never stored, so it can
+-- never go stale.
+--
+-- DATA BOUNDARY: this tracks THAT an item exists and WHEN it expires, plus
+-- a non-sensitive label for who/what it's for — never a document file or
+-- an ID number. Sensitive detail stays in external secure storage.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS compliance_item (
+    id              SERIAL PRIMARY KEY,
+    client_id       INTEGER NOT NULL REFERENCES client(id) ON DELETE CASCADE,
+    document_type   TEXT NOT NULL,
+    position        TEXT,
+    subject_name    TEXT,
+    issue_date      DATE,
+    expiry_date     DATE,
+    created_by      INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_item_client ON compliance_item(client_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_item_expiry ON compliance_item(expiry_date);

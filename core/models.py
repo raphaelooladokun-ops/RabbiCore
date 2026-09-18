@@ -20,6 +20,7 @@ from core.constants import (
     ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
+    ROLE_SUPER_ADMIN,
     STATUS_BLOCKED,
     STATUS_CLOSED,
     STATUS_DISMISSED,
@@ -1674,3 +1675,105 @@ def sync_sla_notifications() -> None:
         """,
         (DUE_SOON_DAYS,),
     )
+
+
+# ---------------------------------------------------------------------------
+# COMPLIANCE TRACKER — per-client compliance items (CERPAC cards, quota
+# approvals, TCCs, ...), independent of any specific job. Urgency is always
+# derived from expiry_date at read time, never stored.
+# ---------------------------------------------------------------------------
+COMPLIANCE_EXPIRED = "expired"
+COMPLIANCE_URGENT = "urgent"
+COMPLIANCE_UPCOMING = "upcoming"
+COMPLIANCE_OK = "ok"
+
+COMPLIANCE_STATUS_LABELS = {
+    COMPLIANCE_EXPIRED: "Expired",
+    COMPLIANCE_URGENT: "Urgent",
+    COMPLIANCE_UPCOMING: "Upcoming",
+    COMPLIANCE_OK: "OK",
+}
+
+# Same 30-day "act now" and 90-day "plan ahead" thresholds already used for
+# job-document expiries (see expiry_urgency above) — one mental model for
+# what "urgent" means everywhere in the app. The one difference: an item
+# with no expiry_date on file at all is "ok" here rather than treated as
+# missing, since a compliance item can legitimately be issue-date-only.
+def compliance_item_status(expiry_date: date | None) -> str:
+    if not expiry_date:
+        return COMPLIANCE_OK
+    days = (expiry_date - date.today()).days
+    if days < 0:
+        return COMPLIANCE_EXPIRED
+    if days <= 30:
+        return COMPLIANCE_URGENT
+    if days <= 90:
+        return COMPLIANCE_UPCOMING
+    return COMPLIANCE_OK
+
+
+def list_compliance_items(client_id: int | None = None) -> list:
+    sql = (
+        "SELECT ci.*, c.name AS client_name FROM compliance_item ci "
+        "JOIN client c ON c.id = ci.client_id WHERE 1=1"
+    )
+    params: list = []
+    if client_id:
+        sql += " AND ci.client_id = %s"
+        params.append(client_id)
+    sql += " ORDER BY ci.expiry_date ASC NULLS LAST, c.name"
+    return query(sql, tuple(params))
+
+
+def compliance_summary() -> dict:
+    """Across every client: total counts by urgency (for the tracker's
+    top section) plus each client's own items with status attached (for
+    the card grid and per-client detail) — one query, two views on it."""
+    items = list_compliance_items()
+    totals = {COMPLIANCE_EXPIRED: 0, COMPLIANCE_URGENT: 0, COMPLIANCE_UPCOMING: 0}
+    by_client: dict = {}
+    for item in items:
+        status = compliance_item_status(item["expiry_date"])
+        item = dict(item)
+        item["status"] = status
+        if status in totals:
+            totals[status] += 1
+        by_client.setdefault(item["client_id"], []).append(item)
+    return {"totals": totals, "by_client": by_client}
+
+
+def create_compliance_item(
+    client_id: int,
+    document_type: str,
+    *,
+    position: str | None = None,
+    subject_name: str | None = None,
+    issue_date: date | None = None,
+    expiry_date: date | None = None,
+    created_by: int | None = None,
+) -> dict:
+    row = execute_returning(
+        "INSERT INTO compliance_item "
+        "(client_id, document_type, position, subject_name, issue_date, expiry_date, created_by) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (client_id, document_type.strip(), (position or "").strip() or None,
+         (subject_name or "").strip() or None, issue_date, expiry_date, created_by),
+    )
+    return query_one("SELECT * FROM compliance_item WHERE id = %s", (row["id"],))
+
+
+def delete_compliance_item(item_id: int) -> None:
+    execute("DELETE FROM compliance_item WHERE id = %s", (item_id,))
+
+
+def staff_sees_compliance(user: dict) -> bool:
+    """EC, manager, admin, super_admin always; a specialist only if
+    they're assigned to the immigration module — everyone else (other
+    specialists, clients) never. Used both for the Compliance nav item
+    (app.py) and the compliance section on a client's own page, so the
+    two can never disagree about who's allowed to see this."""
+    if user["role"] in (ROLE_PRINCIPAL, ROLE_MANAGER, ROLE_ADMIN, ROLE_SUPER_ADMIN):
+        return True
+    if user["role"] == ROLE_SPECIALIST:
+        return "immigration" in list_staff_categories().get(user["id"], [])
+    return False

@@ -27,6 +27,7 @@ from views import (
     capture,
     cit,
     client_detail,
+    compliance_tracker,
     hidden_jobs,
     home_admin,
     home_client,
@@ -96,6 +97,7 @@ NAV = {
         ("Billing", billing.render),
         ("Workload", workload_report.render),
         ("Users", users.render),
+        ("Compliance", compliance_tracker.render),
     ],
     ROLE_ADMIN: [
         ("Home", home_admin.render),
@@ -106,6 +108,7 @@ NAV = {
         ("Billing", billing.render),
         ("Services", services_admin.render),
         ("Users", users.render),
+        ("Compliance", compliance_tracker.render),
     ],
     ROLE_SPECIALIST: [
         ("My Queue", home_specialist.render),
@@ -128,6 +131,7 @@ NAV = {
         ("Workload", workload_report.render),
         ("Services", services_admin.render),
         ("Users", users.render),
+        ("Compliance", compliance_tracker.render),
     ],
     # Full access — the union of every other role's environment, so the
     # firm owner can see and act on all of it from one account.
@@ -142,6 +146,7 @@ NAV = {
         ("Workload", workload_report.render),
         ("Services", services_admin.render),
         ("Users", users.render),
+        ("Compliance", compliance_tracker.render),
         ("Bulk Upload", bulk_upload.render),
         ("Hidden Jobs", hidden_jobs.render),
         ("My Queue", home_specialist.render),
@@ -159,6 +164,8 @@ def main() -> None:
         return
 
     pages = NAV[user["role"]]
+    if user["role"] == ROLE_SPECIALIST and models.staff_sees_compliance(user):
+        pages = pages + [("Compliance", compliance_tracker.render)]
     page_names = [name for name, _ in pages]
 
     # Restores the page/job/invoice the user was on before a hard reload —
