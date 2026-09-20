@@ -257,11 +257,13 @@ class StaffDeleteError(Exception):
 def delete_staff(staff_id: int, force: bool = False) -> None:
     """Super-admin-only real delete — permanent, unlike deactivate. Refuses
     if this person has any history attached (owned or created jobs, an
-    invoice touch, a logged expense, a posted comment): that's real audit
-    trail, not something a cleanup action should silently erase — mirrors
-    delete_job's own invoice-history guard. Deactivate instead for anyone
-    who's actually done work; delete is for a mistakenly-created account
-    with nothing on it yet.
+    invoice touch, a logged expense, a posted comment, an invoice
+    unapproval, a job/invoice code edit, a name/detail field edit, or a
+    compliance item they logged): that's real audit trail, not something a
+    cleanup action should silently erase — mirrors delete_job's own
+    invoice-history guard. Deactivate instead for anyone who's actually
+    done work; delete is for a mistakenly-created account with nothing on
+    it yet.
 
     `force=True` is the PIN-gated escape hatch (super admin only, checked
     in the view layer): it detaches every reference it can null out (job
@@ -277,15 +279,19 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
                                               OR rejected_by = %s OR sent_by = %s)
             OR EXISTS(SELECT 1 FROM job_expense WHERE created_by = %s)
             OR EXISTS(SELECT 1 FROM job_comment WHERE author_id = %s)
+            OR EXISTS(SELECT 1 FROM invoice_unapproval_log WHERE actor_id = %s)
+            OR EXISTS(SELECT 1 FROM code_edit_log WHERE changed_by = %s)
+            OR EXISTS(SELECT 1 FROM field_edit_log WHERE changed_by = %s)
+            OR EXISTS(SELECT 1 FROM compliance_item WHERE created_by = %s)
         ) AS has_history
         """,
-        (staff_id,) * 10,
+        (staff_id,) * 14,
     )
     if row and row["has_history"]:
         if not force:
             raise StaffDeleteError(
-                "This user has jobs, invoices, expenses or comments on file and can't be permanently "
-                "deleted — deactivate instead to keep the record but block their login."
+                "This user has jobs, invoices, expenses, comments or edit history on file and can't be "
+                "permanently deleted — deactivate instead to keep the record but block their login."
             )
         for col in ("owner_id", "created_by", "hidden_by", "start_override_by"):
             execute(f"UPDATE job SET {col} = NULL WHERE {col} = %s", (staff_id,))
