@@ -69,7 +69,39 @@ def create_client(
         "VALUES (%s, %s, %s, %s, %s, 'active') RETURNING id",
         (name, rc_number or None, contact_name or None, contact_email or None, contact_phone or None),
     )
-    return get_client(row["id"])
+    client = get_client(row["id"])
+    if contact_name or contact_email or contact_phone:
+        add_client_contact(client["id"], contact_name, contact_email, contact_phone)
+    return client
+
+
+def list_client_contacts(client_id: int) -> list:
+    return query(
+        "SELECT * FROM client_contact WHERE client_id = %s ORDER BY id", (client_id,)
+    )
+
+
+def add_client_contact(
+    client_id: int, name: str | None = None, email: str | None = None, phone: str | None = None
+) -> dict:
+    row = execute_returning(
+        "INSERT INTO client_contact (client_id, name, email, phone) VALUES (%s, %s, %s, %s) RETURNING id",
+        (client_id, (name or "").strip() or None, (email or "").strip() or None, (phone or "").strip() or None),
+    )
+    return query_one("SELECT * FROM client_contact WHERE id = %s", (row["id"],))
+
+
+def update_client_contact(
+    contact_id: int, name: str | None = None, email: str | None = None, phone: str | None = None
+) -> None:
+    execute(
+        "UPDATE client_contact SET name = %s, email = %s, phone = %s WHERE id = %s",
+        ((name or "").strip() or None, (email or "").strip() or None, (phone or "").strip() or None, contact_id),
+    )
+
+
+def delete_client_contact(contact_id: int) -> None:
+    execute("DELETE FROM client_contact WHERE id = %s", (contact_id,))
 
 
 def list_staff(role: str | None = None, active_only: bool = True) -> list:

@@ -43,7 +43,7 @@ def render(user: dict, client_pk: int) -> None:
 
     _edit_name_control(client, user)
     st.divider()
-    _contact_info(client)
+    _contacts_section(client, user)
     st.divider()
     _jobs_for_client(client)
     if models.staff_sees_compliance(user):
@@ -76,16 +76,48 @@ def _edit_name_control(client: dict, user: dict) -> None:
                 )
 
 
-def _contact_info(client: dict) -> None:
-    st.markdown("#### Contact")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.write(f"**RC number:** {client.get('rc_number') or '—'}")
-        st.write(f"**Contact name:** {titlecase_name(client.get('contact_name')) or '—'}")
-    with c2:
-        st.write(f"**Contact email:** {client.get('contact_email') or '—'}")
-        st.write(f"**Contact phone:** {client.get('contact_phone') or '—'}")
+_CAN_EDIT_CONTACTS = (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+
+
+def _contacts_section(client: dict, user: dict) -> None:
+    st.markdown("#### Contacts")
+    st.write(f"**RC number:** {client.get('rc_number') or '—'}")
     st.write(f"**Status:** {'Active' if client['status'] == 'active' else 'Inactive'}")
+
+    can_edit = user["role"] in _CAN_EDIT_CONTACTS
+    contacts = models.list_client_contacts(client["id"])
+
+    if not contacts:
+        st.caption("No contacts on file yet.")
+    for contact in contacts:
+        if not can_edit:
+            c1, c2, c3 = st.columns(3)
+            c1.write(f"**Name:** {titlecase_name(contact['name']) or '—'}")
+            c2.write(f"**Email:** {contact['email'] or '—'}")
+            c3.write(f"**Phone:** {contact['phone'] or '—'}")
+            continue
+        c1, c2, c3, c4 = st.columns([2, 2, 1.6, 0.9])
+        name = c1.text_input("Name", value=contact["name"] or "", key=f"contact_name_{contact['id']}")
+        email = c2.text_input("Email", value=contact["email"] or "", key=f"contact_email_{contact['id']}")
+        phone = c3.text_input("Phone", value=contact["phone"] or "", key=f"contact_phone_{contact['id']}")
+        if c4.button("Save", key=f"contact_save_{contact['id']}"):
+            models.update_client_contact(contact["id"], name, email, phone)
+            st.toast("Contact updated.", icon="✅")
+            st.rerun()
+
+    if can_edit:
+        with st.expander("+ Add contact"):
+            c1, c2, c3, c4 = st.columns([2, 2, 1.6, 0.9])
+            new_name = c1.text_input("Name", key=f"newcontact_name_{client['id']}")
+            new_email = c2.text_input("Email", key=f"newcontact_email_{client['id']}")
+            new_phone = c3.text_input("Phone", key=f"newcontact_phone_{client['id']}")
+            if c4.button("Add", key=f"newcontact_add_{client['id']}", type="primary"):
+                if not (new_name or new_email or new_phone):
+                    st.error("Enter at least one field.")
+                else:
+                    models.add_client_contact(client["id"], new_name, new_email, new_phone)
+                    st.toast("Contact added.", icon="✅")
+                    st.rerun()
 
 
 def _jobs_for_client(client: dict) -> None:

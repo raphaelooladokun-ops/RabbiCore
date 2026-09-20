@@ -518,3 +518,31 @@ CREATE TABLE IF NOT EXISTS compliance_item (
 
 CREATE INDEX IF NOT EXISTS idx_compliance_item_client ON compliance_item(client_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_item_expiry ON compliance_item(expiry_date);
+
+-- ---------------------------------------------------------------------------
+-- CLIENT CONTACT — a client can have more than one contact person. The
+-- single contact_name/contact_email/contact_phone columns on `client`
+-- stay as the legacy "quick add" fields used at client-creation time
+-- (Capture's inline new-client form, invoice PDFs); this table is the full,
+-- editable, many-per-client list shown on the client detail page.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS client_contact (
+    id              SERIAL PRIMARY KEY,
+    client_id       INTEGER NOT NULL REFERENCES client(id) ON DELETE CASCADE,
+    name            TEXT,
+    email           TEXT,
+    phone           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_contact_client ON client_contact(client_id);
+
+-- One-time backfill: every client with a legacy single contact gets that
+-- contact as its first client_contact row, so nothing already on file
+-- disappears once the page starts reading from this table. Guarded so it
+-- never double-inserts on a later bootstrap.
+INSERT INTO client_contact (client_id, name, email, phone)
+SELECT c.id, c.contact_name, c.contact_email, c.contact_phone
+FROM client c
+WHERE (c.contact_name IS NOT NULL OR c.contact_email IS NOT NULL OR c.contact_phone IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM client_contact cc WHERE cc.client_id = c.id);
