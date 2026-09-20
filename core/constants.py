@@ -36,6 +36,12 @@ ROLE_LABELS = {
     ROLE_MANAGER: "Manager",
 }
 
+# Extra confirmation step on super-admin force-delete (bypassing the normal
+# "refuses if history is attached" guard on users/jobs) — a speed bump
+# against an accidental click on an irreversible action, not real access
+# control; the role check is what actually restricts who can use it.
+FORCE_DELETE_PIN = "4471"
+
 # ---------------------------------------------------------------------------
 # Job status lifecycle
 # ---------------------------------------------------------------------------

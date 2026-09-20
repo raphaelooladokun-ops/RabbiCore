@@ -14,6 +14,7 @@ from core import models
 from core import ui
 from core.constants import (
     CATEGORY_LABELS,
+    FORCE_DELETE_PIN,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
     ROLE_MANAGER,
@@ -825,5 +826,27 @@ def _danger_zone(job: dict, user: dict) -> None:
                 st.error(str(e))
             else:
                 st.toast(f"{job['job_id']} permanently deleted.", icon="✅")
+                ui.clear_all_nav()
+                st.rerun()
+
+        st.divider()
+        st.markdown("**Force delete (bypass invoice check)**")
+        st.caption(
+            "Only needed when the delete above refuses because this job is on an invoice — the "
+            "invoice line is removed but the invoice itself survives. Requires the 4-digit PIN."
+        )
+        force_confirm = st.checkbox(
+            f"Yes, force-delete {job['job_id']} — I understand this cannot be undone.",
+            key=f"forceconfirm_{job['id']}",
+        )
+        force_pin = st.text_input(
+            "4-digit PIN", type="password", max_chars=4, key=f"forcepin_{job['id']}",
+        )
+        if st.button("Force delete", key=f"forcedel_{job['id']}", disabled=not force_confirm, type="primary"):
+            if force_pin != FORCE_DELETE_PIN:
+                st.error("Incorrect PIN.")
+            else:
+                models.delete_job(job["id"], force=True)
+                st.toast(f"{job['job_id']} force-deleted.", icon="✅")
                 ui.clear_all_nav()
                 st.rerun()

@@ -20,6 +20,7 @@ from core import models
 from core import ui
 from core.constants import (
     CATEGORY_LABELS,
+    FORCE_DELETE_PIN,
     ROLE_ADMIN,
     ROLE_LABELS,
     ROLE_MANAGER,
@@ -202,18 +203,40 @@ def _users_list(user: dict) -> None:
                         "it cannot be undone. Deactivate instead to keep the record but block their login."
                     )
                     c1, c2 = st.columns(2)
+                    force_key = f"forceopen_{s['id']}"
                     if c1.button("Yes, delete permanently", key=f"confirmdel_{s['id']}", type="primary"):
                         try:
                             models.delete_staff(s["id"])
                         except models.StaffDeleteError as e:
                             st.error(str(e))
+                            st.session_state[force_key] = True
                         else:
                             st.session_state.pop(confirm_key, None)
                             st.toast(f"{titlecase_name(s['name'])} permanently deleted.", icon="✅")
                             st.rerun()
                     if c2.button("Cancel", key=f"canceldel_{s['id']}"):
                         st.session_state.pop(confirm_key, None)
+                        st.session_state.pop(force_key, None)
                         st.rerun()
+
+                    if st.session_state.get(force_key):
+                        st.caption(
+                            "This user has history on file. A super admin can force-delete anyway — "
+                            "job/invoice/expense references are detached and their comments are removed. "
+                            "Requires the 4-digit PIN."
+                        )
+                        force_pin = st.text_input(
+                            "4-digit PIN", type="password", max_chars=4, key=f"forcepin_{s['id']}",
+                        )
+                        if st.button("Force delete anyway", key=f"forcedel_{s['id']}", type="primary"):
+                            if force_pin != FORCE_DELETE_PIN:
+                                st.error("Incorrect PIN.")
+                            else:
+                                models.delete_staff(s["id"], force=True)
+                                st.session_state.pop(confirm_key, None)
+                                st.session_state.pop(force_key, None)
+                                st.toast(f"{titlecase_name(s['name'])} force-deleted.", icon="✅")
+                                st.rerun()
         else:
             cols[7].caption("—")
             cols[8].caption("—")

@@ -93,6 +93,11 @@ Seeded automatically — one per role, same demo password for all:
 
 Change or remove these before using the app with real client data.
 
+**Force-delete PIN** (super admin only, `core/constants.py:FORCE_DELETE_PIN`): `4471`. Required to
+permanently delete a user or job that already has history/invoices attached, bypassing the normal
+safety refusal. This is a confirmation speed bump, not real access control — the role check is what
+actually restricts who can use it. Change it before using the app with real client data.
+
 ## What's built (first slice)
 
 - **The shared core:** `client`, `job`, `invoice`, `staff`, plus

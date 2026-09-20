@@ -253,14 +253,20 @@ class StaffDeleteError(Exception):
     pass
 
 
-def delete_staff(staff_id: int) -> None:
+def delete_staff(staff_id: int, force: bool = False) -> None:
     """Super-admin-only real delete — permanent, unlike deactivate. Refuses
     if this person has any history attached (owned or created jobs, an
     invoice touch, a logged expense, a posted comment): that's real audit
     trail, not something a cleanup action should silently erase — mirrors
     delete_job's own invoice-history guard. Deactivate instead for anyone
     who's actually done work; delete is for a mistakenly-created account
-    with nothing on it yet."""
+    with nothing on it yet.
+
+    `force=True` is the PIN-gated escape hatch (super admin only, checked
+    in the view layer): it detaches every reference it can null out (job
+    ownership/authorship, invoice actor fields, expense authorship) and
+    deletes the comments this person posted outright, since author_id can't
+    be null — a deliberately destructive path, not the everyday one."""
     row = query_one(
         """
         SELECT (
@@ -275,10 +281,21 @@ def delete_staff(staff_id: int) -> None:
         (staff_id,) * 10,
     )
     if row and row["has_history"]:
-        raise StaffDeleteError(
-            "This user has jobs, invoices, expenses or comments on file and can't be permanently "
-            "deleted — deactivate instead to keep the record but block their login."
-        )
+        if not force:
+            raise StaffDeleteError(
+                "This user has jobs, invoices, expenses or comments on file and can't be permanently "
+                "deleted — deactivate instead to keep the record but block their login."
+            )
+        for col in ("owner_id", "created_by", "hidden_by", "start_override_by"):
+            execute(f"UPDATE job SET {col} = NULL WHERE {col} = %s", (staff_id,))
+        for col in ("created_by", "approved_by", "rejected_by", "sent_by"):
+            execute(f"UPDATE invoice SET {col} = NULL WHERE {col} = %s", (staff_id,))
+        execute("UPDATE job_expense SET created_by = NULL WHERE created_by = %s", (staff_id,))
+        execute("UPDATE invoice_unapproval_log SET actor_id = NULL WHERE actor_id = %s", (staff_id,))
+        execute("UPDATE code_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
+        execute("UPDATE field_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
+        execute("UPDATE compliance_item SET created_by = NULL WHERE created_by = %s", (staff_id,))
+        execute("DELETE FROM job_comment WHERE author_id = %s", (staff_id,))
     execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
 
@@ -671,13 +688,17 @@ class JobDeleteError(Exception):
     pass
 
 
-def delete_job(job_pk: int) -> None:
+def delete_job(job_pk: int, force: bool = False) -> None:
     """Permanently remove a job — distinct from hiding, and deliberately
     harder to undo. Refuses if the job has ever been on an invoice
     (invoice_line references it): that's real accounting history, not
     something a cleanup action should silently erase — hide it instead, or
     take it off the invoice first. job_extension, job_expense, job_comment
     and job_document all cascade automatically.
+
+    `force=True` is the PIN-gated escape hatch (super admin only, checked
+    in the view layer): it removes the job's own invoice_line rows instead
+    of refusing — the invoice record itself survives with fewer lines.
 
     Any other job depending on this one (blocked_by) is resolved first —
     same as when a blocker is marked done, not just a dangling reference
@@ -686,10 +707,12 @@ def delete_job(job_pk: int) -> None:
     that still have a blocker to check)."""
     on_invoice = query_one("SELECT 1 FROM invoice_line WHERE job_id = %s", (job_pk,))
     if on_invoice:
-        raise JobDeleteError(
-            "This job is on an invoice and can't be permanently deleted — hide it instead, "
-            "or remove it from the invoice first."
-        )
+        if not force:
+            raise JobDeleteError(
+                "This job is on an invoice and can't be permanently deleted — hide it instead, "
+                "or remove it from the invoice first."
+            )
+        execute("DELETE FROM invoice_line WHERE job_id = %s", (job_pk,))
     dependents = query("SELECT id, owner_id, status, title, job_id FROM job WHERE blocked_by = %s", (job_pk,))
     for dep in dependents:
         if dep["status"] == STATUS_BLOCKED:
