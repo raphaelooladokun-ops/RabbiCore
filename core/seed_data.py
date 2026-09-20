@@ -150,6 +150,7 @@ DEMO_STAFF = [
     {"name": "Chuka Nwosu", "email": "specialist@rabbiconsult.test", "role": "specialist", "client_name": None},
     {"name": "Amara Bello", "email": "specialist2@rabbiconsult.test", "role": "specialist", "client_name": None},
     {"name": "Chidi Okafor", "email": "client@rabbiconsult.test", "role": "client", "client_name": "Demo Client Ltd"},
+    {"name": "Kemi Adeyemi", "email": "fileroom@rabbiconsult.test", "role": "file_room_admin", "client_name": None},
 ]
 
 # demo jobs. sla_offset_days is relative to seed time; None = no SLA date.

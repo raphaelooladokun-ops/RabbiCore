@@ -18,6 +18,7 @@ from core.constants import (
     RISK_GREY,
     RISK_RED,
     ROLE_ADMIN,
+    ROLE_FILE_ROOM_ADMIN,
     ROLE_MANAGER,
     ROLE_PRINCIPAL,
     ROLE_SPECIALIST,
@@ -1904,3 +1905,63 @@ def staff_sees_compliance(user: dict) -> bool:
     if user["role"] == ROLE_SPECIALIST:
         return "immigration" in list_staff_categories().get(user["id"], [])
     return False
+
+
+# ---------------------------------------------------------------------------
+# FILE REGISTER — the file office's own environment: who has which client's
+# file, for which job, and the full in/out history. Only file_room_admin
+# makes entries; EC/manager/admin/super_admin see the same dashboard
+# read-only (core.constants.ROLE_FILE_ROOM_ADMIN).
+# ---------------------------------------------------------------------------
+FILE_STATUS_OUT = "out"
+FILE_STATUS_RETURNED = "returned"
+
+_FILE_REGISTER_SELECT = (
+    "SELECT fr.*, c.name AS client_name, j.job_id AS job_code, j.title AS job_title, "
+    "col.name AS collected_by_name, log.name AS logged_by_name "
+    "FROM file_register fr "
+    "JOIN client c ON c.id = fr.client_id "
+    "JOIN job j ON j.id = fr.job_id "
+    "JOIN staff col ON col.id = fr.collected_by "
+    "LEFT JOIN staff log ON log.id = fr.logged_by "
+)
+
+
+def file_entry_status(entry: dict) -> str:
+    return FILE_STATUS_RETURNED if entry.get("returned_at") else FILE_STATUS_OUT
+
+
+def can_write_file_register(user: dict) -> bool:
+    return user["role"] == ROLE_FILE_ROOM_ADMIN
+
+
+def checkout_file(
+    client_id: int, job_id: int, collected_by: int, *, out_at=None, logged_by: int | None = None
+) -> dict:
+    row = execute_returning(
+        "INSERT INTO file_register (client_id, job_id, collected_by, logged_by, out_at) "
+        "VALUES (%s, %s, %s, %s, COALESCE(%s, now())) RETURNING id",
+        (client_id, job_id, collected_by, logged_by, out_at),
+    )
+    return query_one(_FILE_REGISTER_SELECT + "WHERE fr.id = %s", (row["id"],))
+
+
+def mark_file_returned(entry_id: int, *, returned_at=None) -> None:
+    execute(
+        "UPDATE file_register SET returned_at = COALESCE(%s, now()) WHERE id = %s",
+        (returned_at, entry_id),
+    )
+
+
+def list_currently_out_files() -> list:
+    return query(_FILE_REGISTER_SELECT + "WHERE fr.returned_at IS NULL ORDER BY fr.out_at ASC")
+
+
+def list_file_register(client_id: int | None = None) -> list:
+    sql = _FILE_REGISTER_SELECT + "WHERE 1=1"
+    params: list = []
+    if client_id:
+        sql += " AND fr.client_id = %s"
+        params.append(client_id)
+    sql += " ORDER BY fr.out_at DESC"
+    return query(sql, tuple(params))

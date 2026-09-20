@@ -26,6 +26,11 @@ ROLE_SUPER_ADMIN = "super_admin"
 # app is an addition alongside admin's existing access, mirroring admin
 # plus the extra oversight views, never a replacement of anyone else's.
 ROLE_MANAGER = "manager"
+# Its own narrow environment, like a specialist's, but for the file office:
+# logs which client file went out, for which job, to whom, and when it
+# comes back. Only role that can make File Register entries — admin/
+# super_admin/EC/manager see the same dashboard read-only.
+ROLE_FILE_ROOM_ADMIN = "file_room_admin"
 
 ROLE_LABELS = {
     ROLE_PRINCIPAL: "Principal",
@@ -34,6 +39,7 @@ ROLE_LABELS = {
     ROLE_CLIENT: "Client",
     ROLE_SUPER_ADMIN: "Super Admin",
     ROLE_MANAGER: "Manager",
+    ROLE_FILE_ROOM_ADMIN: "File Room Admin",
 }
 
 # Extra confirmation step on super-admin force-delete (bypassing the normal

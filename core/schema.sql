@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS staff (
 -- once rows with role = 'manager' exist.
 ALTER TABLE staff DROP CONSTRAINT IF EXISTS staff_role_check;
 ALTER TABLE staff ADD CONSTRAINT staff_role_check
-    CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin', 'manager'));
+    CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin', 'manager', 'file_room_admin'));
 
 -- ---------------------------------------------------------------------------
 -- SERVICE CATALOGUE — the locked 43-service catalogue (CAC / Immigration /
@@ -546,3 +546,26 @@ SELECT c.id, c.contact_name, c.contact_email, c.contact_phone
 FROM client c
 WHERE (c.contact_name IS NOT NULL OR c.contact_email IS NOT NULL OR c.contact_phone IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM client_contact cc WHERE cc.client_id = c.id);
+
+-- ---------------------------------------------------------------------------
+-- FILE REGISTER — the physical (or scanned-file-office) paper trail: which
+-- client file was pulled, for which job, who is holding it, and when it
+-- went out / came back. `returned_at IS NULL` means it's currently out —
+-- never a separately-stored status column that could drift out of sync
+-- with the timestamp that actually defines it (see
+-- models.file_entry_status).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS file_register (
+    id              SERIAL PRIMARY KEY,
+    client_id       INTEGER NOT NULL REFERENCES client(id),
+    job_id          INTEGER NOT NULL REFERENCES job(id),
+    collected_by    INTEGER NOT NULL REFERENCES staff(id),
+    logged_by       INTEGER REFERENCES staff(id),
+    out_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    returned_at     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_register_client ON file_register(client_id);
+CREATE INDEX IF NOT EXISTS idx_file_register_job ON file_register(job_id);
+CREATE INDEX IF NOT EXISTS idx_file_register_out ON file_register(out_at DESC) WHERE returned_at IS NULL;

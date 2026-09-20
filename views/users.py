@@ -22,6 +22,7 @@ from core.constants import (
     CATEGORY_LABELS,
     FORCE_DELETE_PIN,
     ROLE_ADMIN,
+    ROLE_FILE_ROOM_ADMIN,
     ROLE_LABELS,
     ROLE_MANAGER,
     ROLE_PRINCIPAL,
@@ -30,7 +31,7 @@ from core.constants import (
     titlecase_name,
 )
 
-_CREATABLE_ROLES = [ROLE_PRINCIPAL, ROLE_MANAGER, ROLE_ADMIN, ROLE_SPECIALIST]
+_CREATABLE_ROLES = [ROLE_PRINCIPAL, ROLE_MANAGER, ROLE_ADMIN, ROLE_SPECIALIST, ROLE_FILE_ROOM_ADMIN]
 _SPECIALITY_CATEGORIES = ["immigration", "cit", "state"]
 _CREDENTIALS_KEY = "new_user_credentials"
 

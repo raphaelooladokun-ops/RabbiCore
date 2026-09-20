@@ -13,6 +13,7 @@ from core.constants import (
     CATEGORY_LABELS,
     ROLE_ADMIN,
     ROLE_CLIENT,
+    ROLE_FILE_ROOM_ADMIN,
     ROLE_LABELS,
     ROLE_MANAGER,
     ROLE_PRINCIPAL,
@@ -28,6 +29,7 @@ from views import (
     cit,
     client_detail,
     compliance_tracker,
+    file_register,
     hidden_jobs,
     home_admin,
     home_client,
@@ -98,6 +100,7 @@ NAV = {
         ("Workload", workload_report.render),
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
+        ("File Register", file_register.render),
     ],
     ROLE_ADMIN: [
         ("Home", home_admin.render),
@@ -109,12 +112,18 @@ NAV = {
         ("Services", services_admin.render),
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
+        ("File Register", file_register.render),
     ],
     ROLE_SPECIALIST: [
         ("My Queue", home_specialist.render),
     ],
     ROLE_CLIENT: [
         ("My Jobs", home_client.render),
+    ],
+    # Its own narrow environment, like a specialist's — the only role that
+    # can make File Register entries (see models.can_write_file_register).
+    ROLE_FILE_ROOM_ADMIN: [
+        ("File Register", file_register.render),
     ],
     # Near-full operational visibility (Overview + Home), everything admin
     # can do (Capture/Register/Immigration/CIT/Billing/Services/Workload),
@@ -132,6 +141,7 @@ NAV = {
         ("Services", services_admin.render),
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
+        ("File Register", file_register.render),
         ("My Queue", home_specialist.render),
     ],
     # Full access — the union of every other role's environment, so the
@@ -148,6 +158,7 @@ NAV = {
         ("Services", services_admin.render),
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
+        ("File Register", file_register.render),
         ("Bulk Upload", bulk_upload.render),
         ("Hidden Jobs", hidden_jobs.render),
         ("My Queue", home_specialist.render),

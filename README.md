@@ -90,6 +90,7 @@ Seeded automatically — one per role, same demo password for all:
 | Admin | `admin@rabbiconsult.test` | `RabbiDemo123!` |
 | Specialist | `specialist@rabbiconsult.test` | `RabbiDemo123!` |
 | Client | `client@rabbiconsult.test` | `RabbiDemo123!` |
+| File Room Admin | `fileroom@rabbiconsult.test` | `RabbiDemo123!` |
 
 Change or remove these before using the app with real client data.
 
