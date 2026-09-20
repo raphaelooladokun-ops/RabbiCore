@@ -89,6 +89,12 @@ def render(user: dict, job_pk: int) -> None:
         _cit_section(job, user, gate_active=gate_active)
     st.divider()
 
+    # Comments live near the top-level job info — the conversation about a
+    # job is as central as its status, not an afterthought at the bottom of
+    # a long page of actions and invoicing detail.
+    _comments(job, user, locked=gate_active)
+    st.divider()
+
     editable = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
@@ -128,8 +134,6 @@ def render(user: dict, job_pk: int) -> None:
     if can_see_expenses:
         _expenses(job, user)
         st.divider()
-
-    _comments(job, user, locked=gate_active)
 
     if user["role"] == ROLE_SUPER_ADMIN:
         st.divider()
