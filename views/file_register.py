@@ -13,7 +13,7 @@ from core import models
 from core import ui
 from core.constants import titlecase_name
 
-_OUT_WIDTHS = [2.0, 1.8, 2.2, 1.8, 1.0, 1.3]
+_OUT_WIDTHS = [2.0, 1.8, 2.2, 1.6, 0.9, 1.6]
 _HISTORY_WIDTHS = [2.0, 1.8, 2.2, 1.8, 1.8, 1.1]
 
 

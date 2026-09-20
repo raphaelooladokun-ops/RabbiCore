@@ -130,7 +130,7 @@ def _create_user_form() -> None:
         st.rerun()
 
 
-_ROW_WIDTHS = [1.8, 1.1, 0.7, 0.7, 0.5, 0.8, 0.9, 0.9, 1.0, 0.7]
+_ROW_WIDTHS = [1.6, 1.0, 0.85, 0.85, 0.7, 0.9, 0.9, 0.9, 1.0, 0.7]
 
 
 def _users_list(user: dict) -> None:
@@ -158,11 +158,11 @@ def _users_list(user: dict) -> None:
     for s in staff:
         cols = st.columns(_ROW_WIDTHS)
         cols[0].write(f"`{s['email']}`")
-        cols[1].write(titlecase_name(s["name"]))
-        cols[2].write(ROLE_LABELS.get(s["role"], s["role"]))
+        cols[1].markdown(f"**{titlecase_name(s['name'])}**")
+        cols[2].markdown(f"**{ROLE_LABELS.get(s['role'], s['role'])}**")
         specialities = categories_by_staff.get(s["id"], [])
         cols[3].write(", ".join(CATEGORY_LABELS.get(c, c) for c in specialities) if specialities else "—")
-        cols[4].write("Active" if s["active"] else "Inactive")
+        cols[4].markdown(f"**{'Active' if s['active'] else 'Inactive'}**")
         cols[5].write(s["created_at"].strftime("%d %b %Y, %H:%M") if s.get("created_at") else "—")
 
         edit_key = f"editname_open_{s['id']}"

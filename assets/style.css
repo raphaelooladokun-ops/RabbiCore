@@ -282,6 +282,51 @@ button[kind="secondary"],
     color: var(--rc-grey);
 }
 
+/* ---- Single-line buttons/chips/labels app-wide ----------------------------
+   A long client name, job title or action label must never wrap to a
+   second line and break a button's or badge's shape — it shrinks
+   (ellipsis) to fit its box instead. Layout-neutral: only affects text
+   overflow, never width/display, so use_container_width buttons and the
+   sidebar's own flat-surface styling above are unaffected. */
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button,
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-secondary"],
+[data-testid="stBaseButton-tertiary"],
+[data-testid="stSidebar"] button {
+    max-width: 100%;
+}
+.stButton > button *,
+.stDownloadButton > button *,
+.stFormSubmitButton > button *,
+[data-testid="stBaseButton-primary"] *,
+[data-testid="stBaseButton-secondary"] *,
+[data-testid="stBaseButton-tertiary"] *,
+[data-testid="stSidebar"] button *,
+[data-testid="stMetricValue"],
+[data-testid="stMetricLabel"],
+[data-baseweb="tag"] span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+[data-baseweb="tag"] {
+    max-width: 100%;
+}
+/* A markdown paragraph whose ENTIRE content is one bold span (the app's
+   `f"**{label}**"` idiom for a table column header, or any standalone bold
+   label) truncates instead of wrapping. `:only-child` is what keeps this
+   from touching a sentence that merely starts with bold emphasis, like
+   "**Client name** — jobs in this range", where other text shares the
+   paragraph. */
+[data-testid="stMarkdownContainer"] > p > strong:only-child {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* ---- Login screen --------------------------------------------------------*/
 .rc-login-wrap {
     max-width: 380px;
