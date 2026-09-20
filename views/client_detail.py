@@ -49,6 +49,9 @@ def render(user: dict, client_pk: int) -> None:
     if models.staff_sees_compliance(user):
         st.divider()
         _compliance_section(client, user)
+    if user["role"] == ROLE_SUPER_ADMIN:
+        st.divider()
+        _merge_control(client, user)
 
 
 def _edit_name_control(client: dict, user: dict) -> None:
@@ -173,4 +176,39 @@ def _compliance_section(client: dict, user: dict) -> None:
                     created_by=user["id"],
                 )
                 st.toast("Compliance item added.", icon="✅")
+                st.rerun()
+
+
+def _merge_control(client: dict, user: dict) -> None:
+    with st.expander("⚠️ Merge duplicate (super admin)"):
+        st.caption(
+            "Folds this record into another client — every job, invoice, compliance item and contact "
+            f"attributed to **{titlecase_name(client['name'])}** moves to the surviving record, then this "
+            "one is deleted. Use this to clean up a duplicate created under a slightly different name."
+        )
+        others = [c for c in models.list_clients() if c["id"] != client["id"]]
+        if not others:
+            st.caption("No other clients to merge into.")
+            return
+        options = {f"{titlecase_name(c['name'])} (#{c['id']})": c for c in others}
+        target_label = st.selectbox(
+            "Surviving client", options=list(options.keys()), index=None,
+            placeholder="Select the record to keep…", key=f"mergeinto_{client['id']}",
+        )
+        if not target_label:
+            return
+        target = options[target_label]
+        confirm = st.checkbox(
+            f"Yes, merge {titlecase_name(client['name'])} into {titlecase_name(target['name'])} — "
+            "I understand this cannot be undone.",
+            key=f"mergeconfirm_{client['id']}",
+        )
+        if st.button("Merge", key=f"mergebtn_{client['id']}", disabled=not confirm, type="primary"):
+            try:
+                models.merge_clients(client["id"], target["id"])
+            except models.ClientMergeError as e:
+                st.error(str(e))
+            else:
+                st.toast(f"Merged into {titlecase_name(target['name'])}.", icon="✅")
+                ui.go_to_client(target["id"])
                 st.rerun()

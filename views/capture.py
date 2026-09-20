@@ -67,6 +67,7 @@ def _job_form(user: dict) -> None:
         )
 
     new_client_name = new_contact_name = new_contact_email = new_contact_phone = ""
+    use_existing_instead = None
     if client_name == NEW_CLIENT_OPTION:
         with st.container(border=True):
             st.caption("New client — logged straight into the client list, no need to leave this screen.")
@@ -76,6 +77,24 @@ def _job_form(user: dict) -> None:
             nc3, nc4 = st.columns(2)
             new_contact_email = nc3.text_input("Contact email", key="cap_newclient_email")
             new_contact_phone = nc4.text_input("Contact phone", key="cap_newclient_phone")
+
+            similar = models.find_similar_clients(new_client_name.strip()) if new_client_name.strip() else []
+            if similar:
+                st.warning(
+                    "⚠️ This looks similar to a client already on file: "
+                    + ", ".join(titlecase_name(c["name"]) for c in similar)
+                )
+                resolution = st.radio(
+                    "How do you want to proceed?",
+                    ["Use an existing client instead", "Create this as a new, separate client"],
+                    key="cap_dup_resolution",
+                )
+                if resolution == "Use an existing client instead":
+                    existing_map = {titlecase_name(c["name"]): c for c in similar}
+                    pick = st.selectbox(
+                        "Existing client", options=list(existing_map.keys()), key="cap_dup_pick",
+                    )
+                    use_existing_instead = existing_map[pick]
 
     attributes: dict = {}
     if service_name:
@@ -176,12 +195,15 @@ def _job_form(user: dict) -> None:
             if not new_client_name.strip():
                 st.error("Enter a name for the new client.")
                 return
-            client = models.create_client(
-                new_client_name.strip(),
-                contact_name=new_contact_name.strip() or None,
-                contact_email=new_contact_email.strip() or None,
-                contact_phone=new_contact_phone.strip() or None,
-            )
+            if use_existing_instead:
+                client = use_existing_instead
+            else:
+                client = models.create_client(
+                    new_client_name.strip(),
+                    contact_name=new_contact_name.strip() or None,
+                    contact_email=new_contact_email.strip() or None,
+                    contact_phone=new_contact_phone.strip() or None,
+                )
         else:
             client = client_map[client_name]
 

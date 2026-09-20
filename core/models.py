@@ -3,6 +3,7 @@ these functions and never write SQL themselves."""
 
 from __future__ import annotations
 
+import difflib
 import re
 import secrets
 import uuid
@@ -55,6 +56,51 @@ def find_client_by_name(name: str):
     return query_one("SELECT * FROM client WHERE lower(name) = lower(%s)", (name,))
 
 
+_CLIENT_NAME_EQUIVALENTS = {
+    "LTD": "LIMITED",
+    "CO": "COMPANY",
+    "INC": "INCORPORATED",
+    "ENT": "ENTERPRISE",
+    "ENTERPRISES": "ENTERPRISE",
+    "VENTURE": "VENTURES",
+    "NIG": "NIGERIA",
+    "NGN": "NIGERIA",
+    "&": "AND",
+}
+
+
+def _normalize_client_name(name: str) -> str:
+    """Collapses common company-suffix spelling variants ('Ltd' <-> 'Limited',
+    etc.) and punctuation so two names that are really the same company
+    compare equal — used only for duplicate-detection, never for display or
+    storage."""
+    s = re.sub(r"[^\w\s&]", " ", name.upper())
+    tokens = [ _CLIENT_NAME_EQUIVALENTS.get(t, t) for t in s.split() ]
+    return " ".join(tokens)
+
+
+def find_similar_clients(name: str, threshold: float = 0.82) -> list:
+    """Fuzzy duplicate check for client creation: normalizes company-suffix
+    variants (Ltd/Limited, Co/Company, ...) then compares by similarity
+    ratio, so 'Eurochemco Ventures Ltd' flags against 'Eurochemco Ventures
+    Limited' even though the raw strings differ. Returns existing clients
+    scoring at or above `threshold`, best match first."""
+    normalized = _normalize_client_name(name)
+    if not normalized:
+        return []
+    matches = []
+    for c in query("SELECT * FROM client"):
+        other = _normalize_client_name(c["name"])
+        if other == normalized:
+            score = 1.0
+        else:
+            score = difflib.SequenceMatcher(None, normalized, other).ratio()
+        if score >= threshold:
+            matches.append((score, c))
+    matches.sort(key=lambda pair: -pair[0])
+    return [c for _, c in matches]
+
+
 def create_client(
     name: str,
     rc_number: str | None = None,
@@ -102,6 +148,32 @@ def update_client_contact(
 
 def delete_client_contact(contact_id: int) -> None:
     execute("DELETE FROM client_contact WHERE id = %s", (contact_id,))
+
+
+class ClientMergeError(Exception):
+    pass
+
+
+def merge_clients(source_id: int, target_id: int) -> None:
+    """Super-admin-only: fold a duplicate client record into the surviving
+    one — every job, invoice, compliance item, contact and client-role
+    login attributed to `source` moves to `target`, then `source` is
+    deleted. Mirrors merge_staff's approach for the same reason: a plain
+    delete would be blocked by the client's history everywhere it's
+    referenced, and the point of a merge is to keep that history intact
+    under one record instead of discarding it."""
+    if source_id == target_id:
+        raise ClientMergeError("Can't merge a client into itself.")
+    if get_client(target_id) is None:
+        raise ClientMergeError("The surviving client record no longer exists.")
+    if get_client(source_id) is None:
+        raise ClientMergeError("The duplicate client record no longer exists.")
+    execute("UPDATE staff SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    execute("UPDATE invoice SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    execute("UPDATE job SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    execute("UPDATE compliance_item SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    execute("UPDATE client_contact SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    execute("DELETE FROM client WHERE id = %s", (source_id,))
 
 
 def list_staff(role: str | None = None, active_only: bool = True) -> list:
