@@ -132,6 +132,7 @@ NAV = {
         ("Services", services_admin.render),
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
+        ("My Queue", home_specialist.render),
     ],
     # Full access — the union of every other role's environment, so the
     # firm owner can see and act on all of it from one account.

@@ -62,13 +62,16 @@ def render(user: dict, job_pk: int) -> None:
 
     key_prefix = f"jd_{job['id']}"
 
-    # The start-job gate: until a specialist explicitly starts their own New
+    # The start-job gate: until the owner explicitly starts their own New
     # job, ticking documents, commenting and changing status all stay locked
     # — "Start job" below is the only unlocked action. This is a restriction
-    # on the specialist's own workflow, not a business rule, so no other
-    # role (super_admin included) is ever subject to it.
+    # on the owner's own workflow as a working queue-holder, not a business
+    # rule, so it applies to a specialist or a manager owning their own job
+    # the same way, and never to anyone else (super_admin included) or to a
+    # manager looking at a job they don't own — their broader oversight
+    # access there is untouched.
     gate_active = (
-        user["role"] == ROLE_SPECIALIST
+        user["role"] in (ROLE_SPECIALIST, ROLE_MANAGER)
         and job["owner_id"] == user["id"]
         and job["status"] == STATUS_NEW
     )
@@ -257,10 +260,12 @@ def _document_checklist_section(
         )
         st.write("")
 
-    editable = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
-        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and not gate_locked
+    editable = (
+        user["role"] in (ROLE_ADMIN, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+        or (user["role"] == ROLE_MANAGER and not gate_locked)
+        or (user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"] and not gate_locked)
     )
-    if gate_locked and user["role"] == ROLE_SPECIALIST and docs:
+    if gate_locked and docs:
         st.caption("🔒 Locked until you start this job.")
 
     for d in docs:
@@ -479,7 +484,8 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
                             st.rerun()
 
     elif status == STATUS_IN_PROGRESS:
-        if role in (ROLE_SPECIALIST, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        is_owning_worker = role in (ROLE_SPECIALIST, ROLE_MANAGER) and job["owner_id"] == actor_id
+        if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or is_owning_worker:
             c1, c2 = st.columns(2)
             with c1:
                 with st.form(key=f"{key_prefix}_done_form"):
@@ -500,7 +506,7 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
                         else:
                             _apply_status(job["id"], STATUS_BLOCKED, reason.strip(), actor_id)
         else:
-            st.caption("Only the specialist on this job, or the principal, can mark it done or blocked.")
+            st.caption("Only the owner of this job, or the principal, can mark it done or blocked.")
 
     elif status == STATUS_BLOCKED:
         # Reaching here means blocked_now was False above — the dependency
