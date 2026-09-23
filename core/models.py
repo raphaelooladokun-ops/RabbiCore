@@ -600,7 +600,7 @@ def list_jobs(
         sql += " AND (j.title ILIKE %s OR j.job_id ILIKE %s OR c.name ILIKE %s)"
         like = f"%{search}%"
         params += [like, like, like]
-    sql += " ORDER BY j.created_at DESC"
+    sql += " ORDER BY j.pushed_at IS NULL, j.pushed_at DESC, j.created_at DESC"
     jobs = query(sql, tuple(params))
     # A recurring job's next cycle is spawned the moment the current one is
     # marked done (see create_next_cycle_job) so the job_extension linkage
@@ -888,6 +888,18 @@ def set_start_override(job_pk: int, principal_id: int, reason: str) -> None:
         "UPDATE job SET start_override_by = %s, start_override_at = now(), start_override_reason = %s WHERE id = %s",
         (principal_id, reason, job_pk),
     )
+
+
+def push_job(job_pk: int, actor_id: int) -> None:
+    """Flag a job as priority — admin/manager/EC/super_admin only (checked
+    in the view layer). pushed_at is what list_jobs() and every queue view
+    sort on to float it to the top; pushed_by is who did it, for audit."""
+    execute("UPDATE job SET pushed_by = %s, pushed_at = now() WHERE id = %s", (actor_id, job_pk))
+
+
+def unpush_job(job_pk: int) -> None:
+    """Clear the priority flag — the job falls back into normal sort order."""
+    execute("UPDATE job SET pushed_by = NULL, pushed_at = NULL WHERE id = %s", (job_pk,))
 
 
 # ---------------------------------------------------------------------------
@@ -1358,6 +1370,14 @@ def list_recent_specialist_comments(limit: int = 15) -> list:
         """,
         (ROLE_SPECIALIST, limit),
     )
+
+
+def is_pushed(job: dict) -> bool:
+    """Whether a job has been flagged as priority. The one predicate every
+    view's own sort key checks so a pushed job floats to the top of that
+    view's list too, not just list_jobs()'s own default order — a view
+    that re-sorts by risk/SLA would otherwise bury it again."""
+    return job.get("pushed_at") is not None
 
 
 # ---------------------------------------------------------------------------

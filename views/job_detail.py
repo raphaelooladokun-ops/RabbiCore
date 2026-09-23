@@ -79,6 +79,9 @@ def render(user: dict, job_pk: int) -> None:
     _header(job, user)
     st.write("")
 
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        _push_control(job, key_prefix, user)
+
     if gate_active:
         _start_job_gate(job, key_prefix, user)
         st.divider()
@@ -147,6 +150,8 @@ def render(user: dict, job_pk: int) -> None:
 def _header(job: dict, user: dict) -> None:
     st.markdown(f'<div class="rc-page-title">{job["job_id"]}</div>', unsafe_allow_html=True)
     badges = ui.status_badge_html(job["status"]) + "&nbsp;&nbsp;" + ui.risk_badge_html(models.compute_risk(job))
+    if models.is_pushed(job):
+        badges += '&nbsp;&nbsp;<span class="rc-badge rc-badge-navy">📌 Priority</span>'
     time_badge = _time_on_job_badge_html(job, user)
     if time_badge:
         badges += "&nbsp;&nbsp;" + time_badge
@@ -155,6 +160,24 @@ def _header(job: dict, user: dict) -> None:
         f'<div class="rc-job-title" style="margin-top:0.5rem;">{job["title"]}</div>',
         unsafe_allow_html=True,
     )
+
+
+def _push_control(job: dict, key_prefix: str, user: dict) -> None:
+    """admin/manager/EC/super_admin: flag this job as priority so it floats
+    to the top of every queue/list it appears in — Register's triage
+    section, My Queue's Needs attention, home_admin's Needs attention —
+    without changing its actual status or risk colour."""
+    if models.is_pushed(job):
+        pusher = models.get_staff(job["pushed_by"]) if job.get("pushed_by") else None
+        note = f" by {titlecase_name(pusher['name'])}" if pusher else ""
+        st.caption(f"📌 Pushed to the top of every queue{note}.")
+        if st.button("Remove priority", key=f"{key_prefix}_unpush"):
+            models.unpush_job(job["id"])
+            st.rerun()
+    else:
+        if st.button("📌 Push to top of queue", key=f"{key_prefix}_push"):
+            models.push_job(job["id"], user["id"])
+            st.rerun()
 
 
 def _time_on_job_badge_html(job: dict, user: dict) -> str | None:

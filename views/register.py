@@ -64,8 +64,8 @@ def render(
 
 def _triage_section(jobs: list, key_prefix: str) -> None:
     urgent = [j for j in jobs if j["status"] not in (STATUS_CLOSED, STATUS_DISMISSED)]
-    urgent = [j for j in urgent if models.compute_risk(j) in (RISK_RED, RISK_AMBER)]
-    urgent.sort(key=lambda j: (RISK_ORDER[models.compute_risk(j)], j["sla_date"] or j["created_at"].date()))
+    urgent = [j for j in urgent if models.compute_risk(j) in (RISK_RED, RISK_AMBER) or models.is_pushed(j)]
+    urgent.sort(key=lambda j: (0 if models.is_pushed(j) else 1, RISK_ORDER[models.compute_risk(j)], j["sla_date"] or j["created_at"].date()))
 
     st.markdown("#### Needs attention")
     if not urgent:
@@ -136,7 +136,7 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
             if s in (j["job_id"] or "").lower() or s in (j["title"] or "").lower() or s in (j["client_name"] or "").lower()
         ]
 
-    filtered.sort(key=lambda j: (RISK_ORDER[models.compute_risk(j)], -j["created_at"].timestamp()))
+    filtered.sort(key=lambda j: (0 if models.is_pushed(j) else 1, RISK_ORDER[models.compute_risk(j)], -j["created_at"].timestamp()))
 
     if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN):
         _bulk_actions_table(filtered, key_prefix=f"{key_prefix}_all", user=user)
@@ -186,7 +186,7 @@ def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
                 ui.go_to_client(j["client_id"])
         else:
             cols[3].write(titlecase_name(j.get("client_name")) or "—")
-        cols[4].write(j["title"])
+        cols[4].write(("📌 " if models.is_pushed(j) else "") + j["title"])
         cols[5].write(titlecase_name(j.get("owner_name")) or "—")
         cols[6].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[7].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")

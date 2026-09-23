@@ -242,7 +242,7 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
                 go_to_client(j["client_id"])
         else:
             cols[2].write(titlecase_name(j.get("client_name")) or "—")
-        cols[3].write(j["title"])
+        cols[3].write(("📌 " if models.is_pushed(j) else "") + j["title"])
         cols[4].write(titlecase_name(j.get("owner_name")) or "—")
         cols[5].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
         cols[6].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")

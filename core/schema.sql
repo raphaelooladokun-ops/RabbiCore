@@ -197,6 +197,13 @@ ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_by INTEGER REFERENCES st
 ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_at TIMESTAMPTZ;
 ALTER TABLE job ADD COLUMN IF NOT EXISTS start_override_reason TEXT;
 
+-- Push/priority: admin, manager, EC and super_admin can flag a job as
+-- priority so it surfaces to the top of every queue/list it appears in.
+-- pushed_at doubles as the boolean flag (NULL = not pushed) and orders
+-- multiple pushed jobs by how recently each was pushed.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS pushed_by INTEGER REFERENCES staff(id);
+ALTER TABLE job ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;
+
 -- super_admin-only soft delete: a hidden job stays in the database (audit
 -- trail, referential integrity) but every normal read path excludes it —
 -- see models._JOB_SELECT — so it's invisible to every role and absent from

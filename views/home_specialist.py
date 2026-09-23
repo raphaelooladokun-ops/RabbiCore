@@ -24,9 +24,15 @@ def render(user: dict) -> None:
     st.write("")
     ui.risk_legend()
 
-    needs_attention = [j for j in jobs if models.compute_risk(j) in (RISK_RED, RISK_AMBER)]
+    needs_attention = [
+        j for j in jobs if models.compute_risk(j) in (RISK_RED, RISK_AMBER) or models.is_pushed(j)
+    ]
     needs_attention.sort(
-        key=lambda j: (0 if models.compute_risk(j) == RISK_RED else 1, j["sla_date"] or j["created_at"].date())
+        key=lambda j: (
+            0 if models.is_pushed(j) else 1,
+            0 if models.compute_risk(j) == RISK_RED else 1,
+            j["sla_date"] or j["created_at"].date(),
+        )
     )
     attention_ids = {j["id"] for j in needs_attention}
 

@@ -21,7 +21,9 @@ def render(user: dict) -> None:
     jobs = models.list_jobs(exclude_dismissed=True)
 
     today_jobs = [j for j in jobs if j["created_at"].date() == date.today()]
-    urgent = [j for j in jobs if models.compute_risk(j) in (RISK_RED, RISK_AMBER)]
+    urgent = [
+        j for j in jobs if models.compute_risk(j) in (RISK_RED, RISK_AMBER) or models.is_pushed(j)
+    ]
     new_jobs = [j for j in jobs if j["status"] == "new"]
 
     c1, c2, c3 = st.columns(3)
@@ -31,7 +33,12 @@ def render(user: dict) -> None:
 
     st.write("")
     st.markdown("#### Needs attention")
-    urgent.sort(key=lambda j: (j["sla_date"] or (date.today() + timedelta(days=999))))
+    urgent.sort(
+        key=lambda j: (
+            0 if models.is_pushed(j) else 1,
+            j["sla_date"] or (date.today() + timedelta(days=999)),
+        )
+    )
     ui.jobs_row_table(urgent[:10], key_prefix="admin_home_urgent")
 
     st.write("")
