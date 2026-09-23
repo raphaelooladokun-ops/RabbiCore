@@ -19,6 +19,7 @@ from core.constants import (
     RISK_NAVY,
     RISK_RED,
     ROLE_ADMIN,
+    ROLE_CLIENT,
     ROLE_FILE_ROOM_ADMIN,
     ROLE_MANAGER,
     ROLE_PRINCIPAL,
@@ -176,6 +177,80 @@ def merge_clients(source_id: int, target_id: int) -> None:
     execute("UPDATE compliance_item SET client_id = %s WHERE client_id = %s", (target_id, source_id))
     execute("UPDATE client_contact SET client_id = %s WHERE client_id = %s", (target_id, source_id))
     execute("DELETE FROM client WHERE id = %s", (source_id,))
+
+
+class ClientDeleteError(Exception):
+    pass
+
+
+def client_deletion_summary(client_pk: int) -> dict:
+    """Counts of what's attached to a client — jobs, invoices, compliance
+    items, file register entries — the numbers a delete-client warning
+    shows before anything happens."""
+    return {
+        "jobs": query_one("SELECT COUNT(*) AS n FROM job WHERE client_id = %s", (client_pk,))["n"],
+        "invoices": query_one("SELECT COUNT(*) AS n FROM invoice WHERE client_id = %s", (client_pk,))["n"],
+        "compliance_items": query_one(
+            "SELECT COUNT(*) AS n FROM compliance_item WHERE client_id = %s", (client_pk,)
+        )["n"],
+        "file_register_entries": query_one(
+            "SELECT COUNT(*) AS n FROM file_register WHERE client_id = %s", (client_pk,)
+        )["n"],
+    }
+
+
+def delete_client(client_pk: int, force: bool = False) -> None:
+    """Super-admin-only permanent delete of a client — PIN-gated in the
+    view layer, every time, not just on the force path (this is a heavier
+    action than deleting one job or one user: everything attached to the
+    client goes with it). Refuses if the client has any job, invoice, or
+    compliance item on file unless force=True — that's real business
+    history, not something a cleanup action should silently erase.
+
+    force=True cascades: file register entries for this client are
+    removed (no cascade of their own — see schema), every job is
+    force-deleted (mirrors delete_job(force=True) — an invoice with other
+    jobs on it survives with this job's line removed), any invoice left
+    with no jobs on it is deleted outright (its own invoice_line and
+    unapproval-log rows cascade with it), and any client-role login
+    pointing at this client is deactivated rather than left orphaned.
+    Compliance items and contacts cascade automatically at the database
+    level (ON DELETE CASCADE)."""
+    if get_client(client_pk) is None:
+        raise ClientDeleteError("This client no longer exists.")
+
+    summary = client_deletion_summary(client_pk)
+    has_history = summary["jobs"] > 0 or summary["invoices"] > 0 or summary["compliance_items"] > 0
+    if has_history and not force:
+        raise ClientDeleteError(
+            f"This client has {summary['jobs']} job(s), {summary['invoices']} invoice(s) and "
+            f"{summary['compliance_items']} compliance item(s) on file and can't be deleted — "
+            "force-delete with the PIN if you're sure, or clean these up first."
+        )
+
+    if force:
+        execute("DELETE FROM file_register WHERE client_id = %s", (client_pk,))
+        for job in query("SELECT id FROM job WHERE client_id = %s", (client_pk,)):
+            delete_job(job["id"], force=True)
+        # Every job on one of this client's invoices normally belongs to
+        # that same client (the only UI path that builds an invoice offers
+        # just that client's own jobs) and so is already gone from the loop
+        # above — but detach anything left pointing at these invoices
+        # regardless, the same way revise_invoice detaches a dropped job,
+        # so the DELETE below can never hit a foreign-key violation. A
+        # 'closed' job can't have a null invoice_id (the status guard
+        # trigger forbids it), so it reverts to 'done' first.
+        invoice_ids = [r["id"] for r in query("SELECT id FROM invoice WHERE client_id = %s", (client_pk,))]
+        if invoice_ids:
+            execute(
+                "UPDATE job SET status = 'done' WHERE invoice_id = ANY(%s) AND status = 'closed'",
+                (invoice_ids,),
+            )
+            execute("UPDATE job SET invoice_id = NULL WHERE invoice_id = ANY(%s)", (invoice_ids,))
+        execute("DELETE FROM invoice WHERE client_id = %s", (client_pk,))
+        execute("UPDATE staff SET active = FALSE WHERE client_id = %s AND role = %s", (client_pk, ROLE_CLIENT))
+
+    execute("DELETE FROM client WHERE id = %s", (client_pk,))
 
 
 def list_staff(role: str | None = None, active_only: bool = True) -> list:
@@ -1129,6 +1204,30 @@ def list_invoice_lines(invoice_id: int) -> list:
 def invoice_total(invoice_id: int) -> float:
     row = query_one("SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_line WHERE invoice_id = %s", (invoice_id,))
     return float(row["total"]) if row else 0.0
+
+
+def count_invoices() -> int:
+    """The number a "delete all invoices" confirmation shows before it
+    runs — there's no separate is_test flag on an invoice, so this counts
+    every invoice currently in the system."""
+    return query_one("SELECT COUNT(*) AS n FROM invoice")["n"]
+
+
+def delete_all_invoices() -> int:
+    """Super-admin-only, PIN-gated bulk wipe of every invoice — for
+    clearing test data in one deliberate action, not a per-invoice cleanup.
+    Every job currently on an invoice is detached (invoice_id set to NULL);
+    a 'closed' job reverts to 'done' first since the status guard trigger
+    forbids a closed job with no invoice. invoice_line and
+    invoice_unapproval_log rows cascade with their invoice automatically.
+    Returns how many invoices were deleted."""
+    total = count_invoices()
+    if total == 0:
+        return 0
+    execute("UPDATE job SET status = 'done' WHERE invoice_id IS NOT NULL AND status = 'closed'")
+    execute("UPDATE job SET invoice_id = NULL WHERE invoice_id IS NOT NULL")
+    execute("DELETE FROM invoice")
+    return total
 
 
 def close_job(job_pk: int) -> None:

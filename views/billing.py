@@ -11,6 +11,7 @@ import streamlit as st
 from core import models
 from core import ui
 from core.constants import (
+    FORCE_DELETE_PIN,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
     ROLE_MANAGER,
@@ -31,6 +32,10 @@ def render(user: dict) -> None:
         st.divider()
 
     _invoices_list()
+
+    if user["role"] == ROLE_SUPER_ADMIN:
+        st.divider()
+        _delete_all_invoices_control()
 
 
 def _subtitle(role: str) -> str:
@@ -88,3 +93,31 @@ def _invoices_list() -> None:
             elif inv["status"] == "rejected":
                 trail += f" · Rejected by {titlecase_name(inv['rejected_by_name']) or '—'}"
             st.caption(trail)
+
+
+def _delete_all_invoices_control() -> None:
+    with st.expander("🗑️ Delete ALL invoices (super admin) — clearing test data"):
+        st.caption(
+            "Permanently deletes every invoice in the system in one action — for wiping test data, "
+            "not a per-invoice cleanup. There's no separate 'test' flag on an invoice, so this clears "
+            "all of them. Every job currently on an invoice is detached (a Closed job reverts to Done, "
+            "since Closed requires an invoice). This cannot be undone."
+        )
+        count = models.count_invoices()
+        if count == 0:
+            st.caption("No invoices to delete.")
+            return
+
+        st.warning(f"This will permanently delete **{count} invoice(s)**.")
+        confirm = st.checkbox(
+            f"Yes, permanently delete all {count} invoice(s) — I understand this cannot be undone.",
+            key="delallinv_confirm",
+        )
+        pin = st.text_input("4-digit PIN", type="password", max_chars=4, key="delallinv_pin")
+        if st.button("Delete ALL invoices", key="delallinv_btn", disabled=not confirm, type="primary"):
+            if pin != FORCE_DELETE_PIN:
+                st.error("Incorrect PIN.")
+            else:
+                deleted = models.delete_all_invoices()
+                st.toast(f"Deleted {deleted} invoice(s).", icon="✅")
+                st.rerun()

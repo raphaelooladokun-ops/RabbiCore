@@ -15,6 +15,7 @@ import streamlit as st
 from core import models
 from core import ui
 from core.constants import (
+    FORCE_DELETE_PIN,
     RISK_COLORS,
     ROLE_ADMIN,
     ROLE_MANAGER,
@@ -52,6 +53,8 @@ def render(user: dict, client_pk: int) -> None:
     if user["role"] == ROLE_SUPER_ADMIN:
         st.divider()
         _merge_control(client, user)
+        st.divider()
+        _delete_control(client, user)
 
 
 def _edit_name_control(client: dict, user: dict) -> None:
@@ -212,3 +215,48 @@ def _merge_control(client: dict, user: dict) -> None:
                 st.toast(f"Merged into {titlecase_name(target['name'])}.", icon="✅")
                 ui.go_to_client(target["id"])
                 st.rerun()
+
+
+def _delete_control(client: dict, user: dict) -> None:
+    with st.expander("🗑️ Delete client (super admin)"):
+        summary = models.client_deletion_summary(client["id"])
+        has_history = summary["jobs"] > 0 or summary["invoices"] > 0 or summary["compliance_items"] > 0
+
+        if has_history:
+            extra = (
+                f", plus {summary['file_register_entries']} file register entry(ies)"
+                if summary["file_register_entries"] else ""
+            )
+            st.warning(
+                f"**{titlecase_name(client['name'])}** has **{summary['jobs']} job(s)**, "
+                f"**{summary['invoices']} invoice(s)** and **{summary['compliance_items']} compliance "
+                f"item(s)** attached{extra}. Deleting this client permanently deletes ALL of it too — "
+                "every job, every invoice, every compliance item. This cannot be undone."
+            )
+        else:
+            st.caption("No jobs, invoices or compliance items are attached to this client.")
+        st.caption("This is a permanent action and cannot be undone. Requires the 4-digit PIN.")
+
+        confirm_label = f"Yes, permanently delete {titlecase_name(client['name'])}"
+        if has_history:
+            confirm_label += " and everything attached to it"
+        confirm_label += " — I understand this cannot be undone."
+        confirm = st.checkbox(confirm_label, key=f"delclient_confirm_{client['id']}")
+        pin = st.text_input(
+            "4-digit PIN", type="password", max_chars=4, key=f"delclient_pin_{client['id']}",
+        )
+        if st.button(
+            "Delete client permanently", key=f"delclient_btn_{client['id']}",
+            disabled=not confirm, type="primary",
+        ):
+            if pin != FORCE_DELETE_PIN:
+                st.error("Incorrect PIN.")
+            else:
+                try:
+                    models.delete_client(client["id"], force=has_history)
+                except models.ClientDeleteError as e:
+                    st.error(str(e))
+                else:
+                    st.toast(f"{titlecase_name(client['name'])} permanently deleted.", icon="✅")
+                    ui.clear_all_nav()
+                    st.rerun()
