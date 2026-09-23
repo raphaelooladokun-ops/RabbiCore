@@ -573,6 +573,7 @@ def list_jobs(
     category: str | None = None,
     exclude_dismissed: bool = False,
     search: str | None = None,
+    include_recurring_pending: bool = False,
 ) -> list:
     _resync_stale_blocked()
     sql = _JOB_SELECT + " AND 1=1"
@@ -599,7 +600,16 @@ def list_jobs(
         like = f"%{search}%"
         params += [like, like, like]
     sql += " ORDER BY j.created_at DESC"
-    return query(sql, tuple(params))
+    jobs = query(sql, tuple(params))
+    # A recurring job's next cycle is spawned the moment the current one is
+    # marked done (see create_next_cycle_job) so the job_extension linkage
+    # exists right away — but a job not due until next month showing up as
+    # "New" today would overstate what's currently outstanding. Hidden here
+    # by default everywhere jobs are listed; list_recurring_jobs()'s own
+    # forward-looking panel is the one deliberate exception.
+    if not include_recurring_pending:
+        jobs = [j for j in jobs if not is_recurring_job_pending(j)]
+    return jobs
 
 
 def list_jobs_for_invoice(invoice_id: int) -> list:
@@ -1520,6 +1530,22 @@ def is_recurring_service(service_code: str) -> str | None:
     return row["recurring_frequency"] if row else None
 
 
+def is_recurring_job_pending(job: dict) -> bool:
+    """True for a recurring job's next cycle before its actual due month
+    arrives. create_next_cycle_job spawns it as soon as the current cycle
+    is marked done, so the job_extension bookkeeping (next_cycle_job_id)
+    is in place right away — but a job due next month showing up as 'New'
+    today would overstate what's currently outstanding. The date gate for
+    list_jobs()'s default hide-until-due behaviour."""
+    if job.get("status") != STATUS_NEW or not job.get("sla_date") or not job.get("service_type"):
+        return False
+    if not is_recurring_service(job["service_type"]):
+        return False
+    today = date.today()
+    due = job["sla_date"]
+    return (due.year, due.month) > (today.year, today.month)
+
+
 def _add_months(d: date, months: int) -> date:
     import calendar
 
@@ -1586,7 +1612,7 @@ def list_recurring_jobs(category: str | None = None) -> list:
     }
     if not recurring_codes:
         return []
-    jobs = list_jobs(category=category, exclude_dismissed=True)
+    jobs = list_jobs(category=category, exclude_dismissed=True, include_recurring_pending=True)
     out = [
         j for j in jobs
         if j["service_type"] in recurring_codes and j["status"] not in (STATUS_DONE, STATUS_CLOSED)

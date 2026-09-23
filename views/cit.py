@@ -88,7 +88,11 @@ def _recurring_obligations() -> None:
         row_cols[1].write(titlecase_name(j.get("client_name")) or "—")
         row_cols[2].write(j["title"])
         row_cols[3].write(titlecase_name(j.get("owner_name")) or "—")
-        row_cols[4].write(STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"])))
+        status_label = (
+            "Scheduled" if models.is_recurring_job_pending(j)
+            else STATUS_LABELS_SHORT.get(j["status"], humanize(j["status"]))
+        )
+        row_cols[4].write(status_label)
         row_cols[5].write(j["sla_date"].isoformat() if j.get("sla_date") else "—")
 
 
