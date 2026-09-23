@@ -172,6 +172,21 @@ section[data-testid="stSidebar"] {
    selectors and gets the same single-surface treatment, no inner box
    around the "N new" label. */
 
+/* The bell turns red whenever there's something unread — core/ui.py wraps
+   it in a keyed container (st.container(key=...)) specifically so this
+   class exists to hook into; one extra class beats the plain `button`
+   selector above on specificity, no !important arms race needed there,
+   just here. */
+[data-testid="stSidebar"] .st-key-notifwrap_unread button {
+    background-color: #E5484D !important;
+}
+[data-testid="stSidebar"] .st-key-notifwrap_unread button * {
+    color: #FFFFFF !important;
+}
+[data-testid="stSidebar"] .st-key-notifwrap_unread button:hover {
+    background-color: #B3272B !important;
+}
+
 /* ---- Buttons -------------------------------------------------------------*/
 .stButton > button, .stFormSubmitButton > button {
     background-color: var(--rc-teal);

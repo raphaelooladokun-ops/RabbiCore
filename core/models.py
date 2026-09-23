@@ -1289,9 +1289,9 @@ def add_job_comment(job_id: int, author_id: int, body: str) -> None:
 
 
 def _notify_comment(job_pk: int, author_id: int) -> None:
-    """Everyone with a stake in the job — its owner, every admin, every
-    principal — gets told about a new comment, so a note posted by one role
-    doesn't sit unseen by the others."""
+    """Everyone with a stake in the job — its owner, every admin, manager,
+    principal and super_admin — gets told about a new comment, so a note
+    posted by one role doesn't sit unseen by the others."""
     job = query_one(
         "SELECT j.owner_id, j.job_id, j.title, c.name AS client_name, s.name AS author_name "
         "FROM job j LEFT JOIN client c ON c.id = j.client_id JOIN staff s ON s.id = %s "
@@ -1304,7 +1304,10 @@ def _notify_comment(job_pk: int, author_id: int) -> None:
     recipients = set()
     if job["owner_id"] and job["owner_id"] != author_id:
         recipients.add(job["owner_id"])
-    for s in list_staff(role=ROLE_ADMIN) + list_staff(role=ROLE_PRINCIPAL) + list_staff(role=ROLE_MANAGER):
+    for s in (
+        list_staff(role=ROLE_ADMIN) + list_staff(role=ROLE_PRINCIPAL) + list_staff(role=ROLE_MANAGER)
+        + list_staff(role=ROLE_SUPER_ADMIN)
+    ):
         if s["id"] != author_id:
             recipients.add(s["id"])
     for staff_id in recipients:

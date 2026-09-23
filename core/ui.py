@@ -255,11 +255,16 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
 def notification_bell(user: dict) -> None:
     """A bell in the sidebar showing unread alerts for this user — assigned
     jobs, status changes, invoice events, SLA warnings, dependency alerts.
-    Each is clickable and jumps straight to the job or invoice it's about."""
+    Each is clickable and jumps straight to the job or invoice it's about.
+    Turns red (via the st-key-notifwrap_unread CSS hook) whenever there's
+    something unread, for every role — not just a number to notice, a
+    colour to notice."""
     unread = models.count_unread_notifications(user["id"])
     label = f"🔔 {unread} new" if unread else "🔔 Notifications"
     epoch = st.session_state.get("_nav_epoch", 0)
-    with st.sidebar.popover(label, use_container_width=True, key=f"notif_pop_{epoch}"):
+    wrapper_key = "notifwrap_unread" if unread else "notifwrap_read"
+    wrapper = st.sidebar.container(key=wrapper_key)
+    with wrapper.popover(label, use_container_width=True, key=f"notif_pop_{epoch}"):
         st.markdown("**Notifications**")
         notes = models.list_notifications(user["id"], limit=15)
         if not notes:
