@@ -15,6 +15,7 @@ from core.constants import (
     RISK_EMOJI,
     RISK_GREEN,
     RISK_GREY,
+    RISK_NAVY,
     RISK_RED,
     ROLE_ADMIN,
     ROLE_MANAGER,
@@ -28,7 +29,7 @@ from core.constants import (
     titlecase_name,
 )
 
-RISK_ORDER = {RISK_RED: 0, RISK_AMBER: 1, RISK_GREY: 2, RISK_GREEN: 3}
+RISK_ORDER = {RISK_RED: 0, RISK_AMBER: 1, RISK_GREY: 2, RISK_NAVY: 3, RISK_GREEN: 4}
 
 # "Invoiced" isn't a literal job.status value — it's done + already on an
 # invoice — so it's offered as a derived filter option rather than a new

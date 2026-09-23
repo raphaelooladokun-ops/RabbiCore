@@ -126,12 +126,16 @@ RISK_RED = "red"
 RISK_AMBER = "amber"
 RISK_GREEN = "green"
 RISK_GREY = "grey"
+# Done, but not yet invoiced — distinct from RISK_GREEN (done AND invoiced,
+# or closed) so a job still owed billing doesn't read as fully wrapped up.
+RISK_NAVY = "navy"
 
 RISK_COLORS = {
     RISK_RED: "#E5484D",
     RISK_AMBER: "#F5A623",
     RISK_GREEN: "#1ABC9C",
     RISK_GREY: "#8A94A6",
+    RISK_NAVY: NAVY,
 }
 
 RISK_LABELS = {
@@ -139,6 +143,7 @@ RISK_LABELS = {
     RISK_AMBER: "Due / needs attention",
     RISK_GREEN: "Done / ready",
     RISK_GREY: "Monitoring",
+    RISK_NAVY: "Done, unbilled",
 }
 
 RISK_EMOJI = {
@@ -146,6 +151,7 @@ RISK_EMOJI = {
     RISK_AMBER: "🟠",
     RISK_GREEN: "🟢",
     RISK_GREY: "⚪",
+    RISK_NAVY: "🔵",
 }
 
 

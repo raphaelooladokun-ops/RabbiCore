@@ -16,6 +16,7 @@ from core.constants import (
     RISK_AMBER,
     RISK_GREEN,
     RISK_GREY,
+    RISK_NAVY,
     RISK_RED,
     ROLE_ADMIN,
     ROLE_FILE_ROOM_ADMIN,
@@ -1343,7 +1344,12 @@ def list_job_comments(job_id: int) -> list:
 # ---------------------------------------------------------------------------
 def compute_risk(job: dict) -> str:
     status = job["status"]
-    if status in (STATUS_DONE, STATUS_CLOSED):
+    if status == STATUS_DONE:
+        # Same "not yet invoiced" predicate as firm_summary()'s done_unbilled
+        # count — a done job without an invoice is a distinct state from one
+        # that's fully wrapped up, not just "ready".
+        return RISK_NAVY if job.get("invoice_id") is None else RISK_GREEN
+    if status == STATUS_CLOSED:
         return RISK_GREEN
     if status == STATUS_DISMISSED:
         return RISK_GREY

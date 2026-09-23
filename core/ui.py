@@ -16,6 +16,7 @@ from core.constants import (
     RISK_GREEN,
     RISK_GREY,
     RISK_LABELS,
+    RISK_NAVY,
     RISK_RED,
     SOURCE_LABELS,
     STATUS_LABELS_SHORT,
@@ -81,7 +82,7 @@ def risk_legend() -> None:
     items = "".join(
         f'<span class="rc-legend-item">'
         f'<span class="rc-dot" style="background:{RISK_COLORS[r]}"></span>{RISK_LABELS[r]}</span>'
-        for r in (RISK_RED, RISK_AMBER, RISK_GREEN, RISK_GREY)
+        for r in (RISK_RED, RISK_AMBER, RISK_GREEN, RISK_NAVY, RISK_GREY)
     )
     st.markdown(f'<div class="rc-legend">{items}</div>', unsafe_allow_html=True)
 

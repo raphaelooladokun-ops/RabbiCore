@@ -280,6 +280,7 @@ button[kind="secondary"],
 .rc-badge-amber { background: rgba(245, 166, 35, 0.15); color: #8A5A00; }
 .rc-badge-green { background: rgba(26, 188, 156, 0.15); color: #0E7A63; }
 .rc-badge-grey { background: rgba(138, 148, 166, 0.15); color: #566073; }
+.rc-badge-navy { background: rgba(10, 37, 64, 0.12); color: #0A2540; }
 
 /* ---- Colour legend — explains what red/amber/green/grey mean, wherever
    risk colours show up ---------------------------------------------------*/
