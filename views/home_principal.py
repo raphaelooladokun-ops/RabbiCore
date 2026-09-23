@@ -8,7 +8,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import RISK_RED, STATUS_LABELS_SHORT, humanize, titlecase_name
+from core.constants import RISK_RED, ROLE_PRINCIPAL, STATUS_LABELS_SHORT, humanize, titlecase_name
 
 STATUS_ORDER = ["new", "in_progress", "blocked", "done", "closed"]
 STATUS_FILTER_KEY = "principal_status_filter"
@@ -62,23 +62,10 @@ def render(user: dict) -> None:
     unbilled = [j for j in jobs if j["status"] == "done" and j["invoice_id"] is None]
     ui.jobs_row_table(unbilled, key_prefix="principal_unbilled")
 
-    st.write("")
-    st.markdown("#### Updates — recent specialist comments")
-    st.caption("The latest notes specialists have left on jobs, newest first — a quicker read than the notification list.")
-    updates = models.list_recent_specialist_comments(limit=15)
-    if not updates:
-        st.caption("No specialist comments yet.")
-    for c in updates:
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            st.markdown(
-                f"**{titlecase_name(c['author_name'])}** on **{ui.short_job_id(c['job_code'])}** — "
-                f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
-                f"<span style='color:#8A94A6'>{c['created_at'].strftime('%d %b %Y, %H:%M')}</span>",
-                unsafe_allow_html=True,
-            )
-            st.write(c["body"])
-        with col2:
-            if st.button("Open job", key=f"updatefeed_{c['id']}"):
-                ui.go_to_job(c["job_pk"])
-        st.divider()
+    # Manager and super_admin also have a separate Home page (home_admin.py)
+    # that carries the feed — showing it here too would just be the same
+    # thing twice. Principal has no Home page at all, so Overview is the
+    # only place they'll ever see it.
+    if user["role"] == ROLE_PRINCIPAL:
+        st.write("")
+        ui.updates_feed()

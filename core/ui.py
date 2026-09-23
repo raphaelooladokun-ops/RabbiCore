@@ -253,6 +253,33 @@ def jobs_row_table(jobs: list, key_prefix: str) -> None:
             cols[7].write("—")
 
 
+def updates_feed(limit: int = 15) -> None:
+    """Recent specialist comments across every job — a quicker read than
+    the notification bell. Shared by whichever home page a role actually
+    lands on: home_admin.py's Home for admin/manager/super_admin, and
+    home_principal.py's Overview for principal, who has no separate Home
+    page to put it on."""
+    st.markdown("#### Updates — recent specialist comments")
+    st.caption("The latest notes specialists have left on jobs, newest first — a quicker read than the notification list.")
+    updates = models.list_recent_specialist_comments(limit=limit)
+    if not updates:
+        st.caption("No specialist comments yet.")
+    for c in updates:
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.markdown(
+                f"**{titlecase_name(c['author_name'])}** on **{short_job_id(c['job_code'])}** — "
+                f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
+                f"<span style='color:#8A94A6'>{c['created_at'].strftime('%d %b %Y, %H:%M')}</span>",
+                unsafe_allow_html=True,
+            )
+            st.write(c["body"])
+        with col2:
+            if st.button("Open job", key=f"updatefeed_{c['id']}"):
+                go_to_job(c["job_pk"])
+        st.divider()
+
+
 def notification_bell(user: dict) -> None:
     """A bell in the sidebar showing unread alerts for this user — assigned
     jobs, status changes, invoice events, SLA warnings, dependency alerts.

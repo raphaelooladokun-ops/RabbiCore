@@ -33,3 +33,6 @@ def render(user: dict) -> None:
     st.markdown("#### Needs attention")
     urgent.sort(key=lambda j: (j["sla_date"] or (date.today() + timedelta(days=999))))
     ui.jobs_row_table(urgent[:10], key_prefix="admin_home_urgent")
+
+    st.write("")
+    ui.updates_feed()
