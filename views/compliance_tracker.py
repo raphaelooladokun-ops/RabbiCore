@@ -12,9 +12,27 @@ from datetime import date
 
 import streamlit as st
 
-from core import models
+from core import compliance_bulk_import, models
 from core import ui
-from core.constants import RISK_AMBER, RISK_COLORS, RISK_EMOJI, RISK_GREEN, RISK_GREY, RISK_RED, titlecase_name
+from core.constants import (
+    RISK_AMBER,
+    RISK_COLORS,
+    RISK_EMOJI,
+    RISK_GREEN,
+    RISK_GREY,
+    RISK_RED,
+    ROLE_ADMIN,
+    ROLE_MANAGER,
+    ROLE_PRINCIPAL,
+    ROLE_SUPER_ADMIN,
+    titlecase_name,
+)
+
+_CAN_BULK_UPLOAD = (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+_PREVIEW_KEY = "compliance_bulk_preview"
+_FILENAME_KEY = "_compliance_bulk_filename"
+_RESULT_KEY = "compliance_bulk_result"
+_EPOCH_KEY = "_compliance_bulk_epoch"
 
 _STATUS_COLOR = {
     models.COMPLIANCE_EXPIRED: RISK_RED,
@@ -46,6 +64,10 @@ def render(user: dict) -> None:
     _urgent_summary(summary)
     st.divider()
     _client_cards(summary)
+
+    if user["role"] in _CAN_BULK_UPLOAD:
+        st.divider()
+        _bulk_upload_section(user)
 
 
 def _item_subject_label(item: dict) -> str:
@@ -126,3 +148,119 @@ def _client_cards(summary: dict) -> None:
                     st.caption(f"{len(items)} item(s) tracked" if items else "No items tracked")
                     if st.button("Open", key=f"comp_card_{client['id']}", use_container_width=True):
                         ui.go_to_client(client["id"])
+
+
+def _bulk_upload_section(user: dict) -> None:
+    st.markdown("#### Bulk upload compliance items")
+    st.caption(
+        "Expected columns: **Client, Document Type, Position, Name, Issue Date, Expiry Date** "
+        "(dates as DD/MM/YYYY). Client must match an existing record exactly — new clients aren't "
+        "created from here. Only the item and its dates are stored; no files or ID numbers."
+    )
+
+    result = st.session_state.pop(_RESULT_KEY, None)
+    if result:
+        msg = f"Created {result['items_created']} compliance item(s)."
+        if result["items_skipped"]:
+            msg += f" Skipped {result['items_skipped']} row(s) missing a client or document type."
+        st.success(msg)
+
+    epoch = st.session_state.get(_EPOCH_KEY, 0)
+    uploaded = st.file_uploader("CSV file", type=["csv"], key=f"compliance_bulk_file_{epoch}")
+    if uploaded is not None and st.session_state.get(_FILENAME_KEY) != uploaded.name:
+        _load_compliance_preview(uploaded)
+
+    preview = st.session_state.get(_PREVIEW_KEY)
+    if preview:
+        _render_compliance_preview(preview, user)
+
+
+def _load_compliance_preview(uploaded) -> None:
+    try:
+        rows = compliance_bulk_import.parse_csv(uploaded.getvalue())
+    except compliance_bulk_import.ComplianceBulkImportError as e:
+        st.error(str(e))
+        st.session_state.pop(_PREVIEW_KEY, None)
+        st.session_state.pop(_FILENAME_KEY, None)
+        return
+
+    if not rows:
+        st.warning("No data rows found in that file.")
+        st.session_state.pop(_PREVIEW_KEY, None)
+        st.session_state.pop(_FILENAME_KEY, None)
+        return
+
+    clients = models.list_clients()
+    st.session_state[_PREVIEW_KEY] = compliance_bulk_import.build_preview(rows, clients)
+    st.session_state[_FILENAME_KEY] = uploaded.name
+
+
+def _render_compliance_preview(preview: list, user: dict) -> None:
+    clients = models.list_clients()
+    client_options = {titlecase_name(c["name"]): c for c in clients}
+
+    unmatched = [r for r in preview if not r["client"]]
+    bad_dates = [r for r in preview if r["issue_date_error"] or r["expiry_date_error"]]
+    missing_doctype = [r for r in preview if r["missing_doctype"]]
+
+    st.write("")
+    st.markdown("#### Preview")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rows", len(preview))
+    m2.metric("Unmatched clients", len(unmatched))
+    m3.metric("Unparseable dates", len(bad_dates))
+    m4.metric("Missing document type", len(missing_doctype))
+
+    if unmatched or bad_dates or missing_doctype:
+        st.warning("Rows marked ⚠️ below need a fix before commit — pick a client manually, correct a date, or add a document type.")
+
+    for r in preview:
+        raw = r["raw"]
+        with st.container(border=True):
+            c1, c2 = st.columns([2, 3])
+            with c1:
+                if r["client"]:
+                    st.write(f"**{titlecase_name(raw[compliance_bulk_import.COL_CLIENT])}**  ✅ matched")
+                    r["_final_client"] = r["client"]
+                else:
+                    st.write(f"**{raw[compliance_bulk_import.COL_CLIENT] or '— no client —'}**  ⚠️ no match")
+                    choice = st.selectbox(
+                        "Client (pick manually)", options=list(client_options.keys()), index=None,
+                        placeholder="Select…", key=f"compbulk_client_{r['index']}",
+                    )
+                    r["_final_client"] = client_options.get(choice)
+                doctype_label = "Document type" + (" ⚠️ required" if r["missing_doctype"] else "")
+                st.caption(f"{doctype_label}: {raw[compliance_bulk_import.COL_DOCTYPE] or '—'}")
+                st.caption(
+                    f"Position: {raw[compliance_bulk_import.COL_POSITION] or '—'} · "
+                    f"Name: {raw[compliance_bulk_import.COL_NAME] or '—'}"
+                )
+            with c2:
+                issue_label = "Issue date" + (" ⚠️ couldn't parse — set manually" if r["issue_date_error"] else "")
+                r["_final_issue_date"] = st.date_input(
+                    issue_label, value=r["issue_date"], key=f"compbulk_issue_{r['index']}",
+                )
+                expiry_label = "Expiry date" + (" ⚠️ couldn't parse — set manually" if r["expiry_date_error"] else "")
+                r["_final_expiry_date"] = st.date_input(
+                    expiry_label, value=r["expiry_date"], key=f"compbulk_expiry_{r['index']}",
+                )
+
+    st.write("")
+    if st.button(f"Commit import — create up to {len(preview)} item(s)", type="primary", key="compbulk_commit"):
+        resolved = [
+            {
+                "client_id": r["_final_client"]["id"] if r.get("_final_client") else None,
+                "document_type": r["raw"][compliance_bulk_import.COL_DOCTYPE],
+                "position": r["raw"][compliance_bulk_import.COL_POSITION],
+                "subject_name": r["raw"][compliance_bulk_import.COL_NAME],
+                "issue_date": r.get("_final_issue_date"),
+                "expiry_date": r.get("_final_expiry_date"),
+            }
+            for r in preview
+        ]
+        summary = compliance_bulk_import.commit_import(resolved, user["id"])
+        st.session_state.pop(_PREVIEW_KEY, None)
+        st.session_state.pop(_FILENAME_KEY, None)
+        st.session_state[_RESULT_KEY] = summary
+        st.session_state[_EPOCH_KEY] = st.session_state.get(_EPOCH_KEY, 0) + 1
+        st.rerun()
