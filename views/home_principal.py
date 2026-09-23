@@ -61,3 +61,24 @@ def render(user: dict) -> None:
     st.markdown("#### Done — awaiting invoice")
     unbilled = [j for j in jobs if j["status"] == "done" and j["invoice_id"] is None]
     ui.jobs_row_table(unbilled, key_prefix="principal_unbilled")
+
+    st.write("")
+    st.markdown("#### Updates — recent specialist comments")
+    st.caption("The latest notes specialists have left on jobs, newest first — a quicker read than the notification list.")
+    updates = models.list_recent_specialist_comments(limit=15)
+    if not updates:
+        st.caption("No specialist comments yet.")
+    for c in updates:
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.markdown(
+                f"**{titlecase_name(c['author_name'])}** on **{ui.short_job_id(c['job_code'])}** — "
+                f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
+                f"<span style='color:#8A94A6'>{c['created_at'].strftime('%d %b %Y, %H:%M')}</span>",
+                unsafe_allow_html=True,
+            )
+            st.write(c["body"])
+        with col2:
+            if st.button("Open job", key=f"updatefeed_{c['id']}"):
+                ui.go_to_job(c["job_pk"])
+        st.divider()

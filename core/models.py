@@ -1338,6 +1338,28 @@ def list_job_comments(job_id: int) -> list:
     )
 
 
+def list_recent_specialist_comments(limit: int = 15) -> list:
+    """Most recent comments left by specialists, across every job — the raw
+    feed a home page's "Updates" panel surfaces, cleaner than digging
+    through the notification bell or each job's own comment thread one by
+    one."""
+    return query(
+        """
+        SELECT c.id, c.job_id AS job_pk, c.body, c.created_at,
+               s.name AS author_name, j.job_id AS job_code, j.title AS job_title,
+               cl.name AS client_name
+        FROM job_comment c
+        JOIN staff s ON s.id = c.author_id
+        JOIN job j ON j.id = c.job_id
+        LEFT JOIN client cl ON cl.id = j.client_id
+        WHERE s.role = %s AND j.hidden = FALSE
+        ORDER BY c.created_at DESC
+        LIMIT %s
+        """,
+        (ROLE_SPECIALIST, limit),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Risk / urgency colour + stall flag — computed, not stored, so the rule
 # lives in one place and can never drift screen to screen.
