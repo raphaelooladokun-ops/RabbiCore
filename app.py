@@ -130,6 +130,7 @@ NAV = {
     # minus the final-authority actions reserved to EC/super_admin (those
     # are gated inside each view, not by nav — see core/constants.py).
     ROLE_MANAGER: [
+        ("My Queue", home_specialist.render),
         ("Overview", home_principal.render),
         ("Home", home_admin.render),
         ("Capture", capture.render),
@@ -142,7 +143,6 @@ NAV = {
         ("Users", users.render),
         ("Compliance", compliance_tracker.render),
         ("File Register", file_register.render),
-        ("My Queue", home_specialist.render),
     ],
     # Full access — the union of every other role's environment, so the
     # firm owner can see and act on all of it from one account.
