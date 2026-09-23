@@ -268,6 +268,24 @@ CREATE TABLE IF NOT EXISTS job_expense (
 CREATE INDEX IF NOT EXISTS idx_job_expense_job_id ON job_expense(job_id);
 
 -- ---------------------------------------------------------------------------
+-- JOB COSTING LINE — a simple costing sheet per job: what a line item cost
+-- the firm vs. what it's priced at, so cost/margin sit next to the expense
+-- log and the invoice instead of being worked out separately. admin,
+-- manager, EC and super_admin only — never specialists or clients.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS job_costing_line (
+    id              SERIAL PRIMARY KEY,
+    job_id          INTEGER NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+    description     TEXT NOT NULL,
+    cost            NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (cost >= 0),
+    price           NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (price >= 0),
+    created_by      INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_costing_line_job_id ON job_costing_line(job_id);
+
+-- ---------------------------------------------------------------------------
 -- JOB COMMENT — a lightweight comment thread on a job. Anyone with access to
 -- the job can post; kept simple on purpose (no edits, no threading).
 -- ---------------------------------------------------------------------------

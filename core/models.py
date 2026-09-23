@@ -258,10 +258,10 @@ class StaffDeleteError(Exception):
 def delete_staff(staff_id: int, force: bool = False) -> None:
     """Super-admin-only real delete — permanent, unlike deactivate. Refuses
     if this person has any history attached (owned or created jobs, an
-    invoice touch, a logged expense, a posted comment, an invoice
-    unapproval, a job/invoice code edit, a name/detail field edit, or a
-    compliance item they logged): that's real audit trail, not something a
-    cleanup action should silently erase — mirrors delete_job's own
+    invoice touch, a logged expense, a costing-sheet line, a posted
+    comment, an invoice unapproval, a job/invoice code edit, a name/detail
+    field edit, or a compliance item they logged): that's real audit
+    trail, not something a cleanup action should silently erase — mirrors delete_job's own
     invoice-history guard. Deactivate instead for anyone who's actually
     done work; delete is for a mistakenly-created account with nothing on
     it yet.
@@ -279,6 +279,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
             OR EXISTS(SELECT 1 FROM invoice WHERE created_by = %s OR approved_by = %s
                                               OR rejected_by = %s OR sent_by = %s)
             OR EXISTS(SELECT 1 FROM job_expense WHERE created_by = %s)
+            OR EXISTS(SELECT 1 FROM job_costing_line WHERE created_by = %s)
             OR EXISTS(SELECT 1 FROM job_comment WHERE author_id = %s)
             OR EXISTS(SELECT 1 FROM invoice_unapproval_log WHERE actor_id = %s)
             OR EXISTS(SELECT 1 FROM code_edit_log WHERE changed_by = %s)
@@ -286,7 +287,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
             OR EXISTS(SELECT 1 FROM compliance_item WHERE created_by = %s)
         ) AS has_history
         """,
-        (staff_id,) * 14,
+        (staff_id,) * 15,
     )
     if row and row["has_history"]:
         if not force:
@@ -299,6 +300,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
         for col in ("created_by", "approved_by", "rejected_by", "sent_by"):
             execute(f"UPDATE invoice SET {col} = NULL WHERE {col} = %s", (staff_id,))
         execute("UPDATE job_expense SET created_by = NULL WHERE created_by = %s", (staff_id,))
+        execute("UPDATE job_costing_line SET created_by = NULL WHERE created_by = %s", (staff_id,))
         execute("UPDATE invoice_unapproval_log SET actor_id = NULL WHERE actor_id = %s", (staff_id,))
         execute("UPDATE code_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
         execute("UPDATE field_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
@@ -328,6 +330,7 @@ def merge_staff(source_id: int, target_id: int) -> None:
     for col in ("created_by", "approved_by", "rejected_by", "sent_by"):
         execute(f"UPDATE invoice SET {col} = %s WHERE {col} = %s", (target_id, source_id))
     execute("UPDATE job_expense SET created_by = %s WHERE created_by = %s", (target_id, source_id))
+    execute("UPDATE job_costing_line SET created_by = %s WHERE created_by = %s", (target_id, source_id))
     execute("UPDATE job_comment SET author_id = %s WHERE author_id = %s", (target_id, source_id))
     execute(
         "UPDATE module_specialist SET staff_id = %s WHERE staff_id = %s "
@@ -711,8 +714,8 @@ def delete_job(job_pk: int, force: bool = False) -> None:
     harder to undo. Refuses if the job has ever been on an invoice
     (invoice_line references it): that's real accounting history, not
     something a cleanup action should silently erase — hide it instead, or
-    take it off the invoice first. job_extension, job_expense, job_comment
-    and job_document all cascade automatically.
+    take it off the invoice first. job_extension, job_expense, job_comment,
+    job_costing_line and job_document all cascade automatically.
 
     `force=True` is the PIN-gated escape hatch (super admin only, checked
     in the view layer): it removes the job's own invoice_line rows instead
@@ -1298,6 +1301,49 @@ def list_job_expenses(job_id: int) -> list:
         """,
         (job_id,),
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-job costing sheet — line items with a cost and a price, so a job's
+# margin sits next to its expense log and its invoice instead of being
+# worked out separately. admin/manager/EC/super_admin only.
+# ---------------------------------------------------------------------------
+def add_job_costing_line(job_id: int, description: str, cost: float, price: float, created_by: int) -> None:
+    execute(
+        "INSERT INTO job_costing_line (job_id, description, cost, price, created_by) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (job_id, description.strip(), cost, price, created_by),
+    )
+
+
+def list_job_costing_lines(job_id: int) -> list:
+    return query(
+        """
+        SELECT cl.*, s.name AS created_by_name
+        FROM job_costing_line cl
+        LEFT JOIN staff s ON s.id = cl.created_by
+        WHERE cl.job_id = %s
+        ORDER BY cl.id
+        """,
+        (job_id,),
+    )
+
+
+def delete_job_costing_line(line_id: int) -> None:
+    execute("DELETE FROM job_costing_line WHERE id = %s", (line_id,))
+
+
+def job_costing_totals(job_id: int) -> dict:
+    """Sums across every costing line for this job — what the summary strip
+    next to the expense log and invoice reads from."""
+    row = query_one(
+        "SELECT COALESCE(SUM(cost), 0) AS total_cost, COALESCE(SUM(price), 0) AS total_price "
+        "FROM job_costing_line WHERE job_id = %s",
+        (job_id,),
+    )
+    total_cost = float(row["total_cost"])
+    total_price = float(row["total_price"])
+    return {"total_cost": total_cost, "total_price": total_price, "margin": total_price - total_cost}
 
 
 # ---------------------------------------------------------------------------

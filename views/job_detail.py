@@ -135,6 +135,10 @@ def render(user: dict, job_pk: int) -> None:
         _invoice_section(job, user)
         st.divider()
 
+    if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        _costing_sheet(job, user)
+        st.divider()
+
     can_see_expenses = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
         user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
     )
@@ -760,6 +764,58 @@ def _invoice_section(job: dict, user: dict) -> None:
                         cit.sync_tcc_gate(actor_id=user["id"])
                     st.toast("Job closed.", icon="✅")
                     st.rerun()
+
+
+_COSTING_WIDTHS = [2.6, 1.2, 1.2, 1.4, 0.5]
+
+
+def _costing_sheet(job: dict, user: dict) -> None:
+    """A simple line-item costing sheet — cost vs. price per line — sitting
+    next to the expense log and the invoice so a job's numbers are all in
+    one place instead of worked out separately. admin/manager/EC/
+    super_admin only."""
+    st.markdown("#### Costing sheet")
+    lines = models.list_job_costing_lines(job["id"])
+    totals = models.job_costing_totals(job["id"])
+
+    if lines:
+        header = st.columns(_COSTING_WIDTHS)
+        for col, label in zip(header, ["Description", "Cost", "Price", "Added by", ""]):
+            col.markdown(f"**{label}**")
+        for line in lines:
+            cols = st.columns(_COSTING_WIDTHS)
+            cols[0].write(line["description"])
+            cols[1].write(f"₦{float(line['cost']):,.2f}")
+            cols[2].write(f"₦{float(line['price']):,.2f}")
+            cols[3].write(titlecase_name(line.get("created_by_name")) or "—")
+            if cols[4].button("🗑", key=f"costline_del_{line['id']}", help="Remove this line"):
+                models.delete_job_costing_line(line["id"])
+                st.rerun()
+    else:
+        st.caption("No costing lines yet.")
+
+    expenses_total = sum(float(e["amount"]) for e in models.list_job_expenses(job["id"]))
+    invoiced_label = (
+        f"₦{models.invoice_total(job['invoice_id']):,.2f}" if job.get("invoice_id") else "not yet invoiced"
+    )
+    st.caption(
+        f"Cost: ₦{totals['total_cost']:,.2f} · Price: ₦{totals['total_price']:,.2f} · "
+        f"Margin: ₦{totals['margin']:,.2f}  |  Expenses logged: ₦{expenses_total:,.2f}  |  Invoiced: {invoiced_label}"
+    )
+
+    with st.form(key=f"costing_form_{job['id']}", clear_on_submit=True):
+        st.write("Add costing line")
+        c1, c2, c3 = st.columns([2, 1, 1])
+        desc = c1.text_input("Description", label_visibility="collapsed", placeholder="Description")
+        cost = c2.number_input("Cost", min_value=0.0, step=100.0, format="%.2f", label_visibility="collapsed")
+        price = c3.number_input("Price", min_value=0.0, step=100.0, format="%.2f", label_visibility="collapsed")
+        if st.form_submit_button("Add line"):
+            if not desc.strip():
+                st.error("Enter a description.")
+            else:
+                models.add_job_costing_line(job["id"], desc.strip(), cost, price, user["id"])
+                st.toast("Costing line added.", icon="✅")
+                st.rerun()
 
 
 _EXPENSE_WIDTHS = [2.6, 1.3, 1.1, 1.4]
