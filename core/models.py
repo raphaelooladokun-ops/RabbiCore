@@ -2019,6 +2019,87 @@ def list_pending_recurring_obligations_for_client(client_id: int, category: str 
     return query(sql, tuple(params))
 
 
+def migrate_current_period_recurring_jobs(actor_id: int) -> dict:
+    """One-time cleanup for services that recurred before this shared-
+    checklist model existed: every still-visible, non-dismissed per-client
+    job for a recurring service is folded onto that period's parent
+    (created if this is the first client folded into it) as a checklist
+    line, carrying over a completed job's own completion date, and the
+    old per-client job is then hidden — never deleted, so its comments,
+    documents, costing and any invoice history all stay fully intact and
+    reachable from Hidden Jobs, just out of every active list. Nothing
+    from the live tick flow (desk-exam spawning, TCC-gate sync) is
+    replayed here: a job that already went through that flow for real
+    recorded it on itself already, and replaying it now would duplicate
+    it. The one live echo kept is spawning the next cycle, exactly as a
+    real last tick would, for a parent that this migration itself happens
+    to complete in full.
+
+    Idempotent: a job this has already hidden is never selected again, a
+    client already on a period's parent is left untouched (ON CONFLICT in
+    _get_or_create_recurring_parent), and create_next_cycle_job no-ops
+    once a parent already has a next_cycle_job_id. Only CIT and State's
+    own recurring services are ever touched — a service without a
+    recurring_frequency, and so every non-recurring job, is never a
+    candidate."""
+    recurring = {
+        r["code"]: r["recurring_frequency"]
+        for r in query("SELECT code, recurring_frequency FROM service_catalogue WHERE recurring_frequency IS NOT NULL")
+    }
+    if not recurring:
+        return {"parents_touched": 0, "jobs_migrated": 0, "jobs_skipped": 0}
+
+    old_jobs = query(
+        """
+        SELECT id, client_id, category, service_type, source, sla_date, status, completed_at
+        FROM job
+        WHERE client_id IS NOT NULL AND hidden = FALSE AND status <> %s
+          AND service_type = ANY(%s)
+        ORDER BY sla_date, id
+        """,
+        (STATUS_DISMISSED, list(recurring.keys())),
+    )
+
+    parents_touched: dict[int, dict] = {}
+    migrated = 0
+    skipped = 0
+    for j in old_jobs:
+        if not j["sla_date"]:
+            skipped += 1
+            continue
+        frequency = recurring[j["service_type"]]
+        period_anchor = _recurring_period_anchor(j["sla_date"], frequency)
+        parent = _get_or_create_recurring_parent(
+            j["service_type"], j["category"], period_anchor, j["source"] or "client_email",
+            actor_id, [j["client_id"]],
+        )
+        parents_touched[parent["id"]] = parent
+
+        if j["status"] in (STATUS_DONE, STATUS_CLOSED):
+            execute(
+                "UPDATE recurring_job_client SET completed = TRUE, "
+                "completed_at = %s, completed_by = NULL "
+                "WHERE job_id = %s AND client_id = %s",
+                (j["completed_at"] or now_utc(), parent["id"], j["client_id"]),
+            )
+
+        execute(
+            "UPDATE job SET internal_notes = "
+            "trim(both E'\\n' from coalesce(internal_notes, '') || E'\\n' || %s) "
+            "WHERE id = %s",
+            (f"Folded into shared recurring checklist {parent['job_id']} (per-client model retired).", j["id"]),
+        )
+        hide_jobs([j["id"]], actor_id)
+        migrated += 1
+
+    for parent_id in parents_touched:
+        _sync_recurring_rollup(parent_id, actor_id=actor_id)
+        if get_job(parent_id)["status"] == STATUS_DONE:
+            create_next_cycle_job(parent_id, actor_id=actor_id)
+
+    return {"parents_touched": len(parents_touched), "jobs_migrated": migrated, "jobs_skipped": skipped}
+
+
 def list_recurring_jobs(category: str | None = None) -> list:
     """Every not-yet-finished job whose service recurs on a schedule,
     ordered by due date — powers each module's 'upcoming recurring
