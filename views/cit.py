@@ -69,8 +69,9 @@ def _upcoming_expiries() -> None:
 def _recurring_obligations() -> None:
     st.markdown("#### Upcoming recurring obligations")
     st.caption(
-        "Monthly VAT Returns, VAT & WHT Monitoring, Yearly VAT Analysis, and Annual Return — "
-        "marking one done automatically creates the next cycle, so this list is what's still due."
+        "Monthly VAT Returns, VAT & WHT Monitoring, Yearly VAT Analysis, and Annual Return — one shared "
+        "checklist job per period, every client due that period on it. Ticking the last client off "
+        "automatically creates the next cycle's job, so this list is what's still due."
     )
     rows = models.list_recurring_jobs(category="cit")
     if not rows:
@@ -78,14 +79,18 @@ def _recurring_obligations() -> None:
         return
 
     cols = st.columns([1.1, 2.0, 1.6, 1.2, 1.2, 1.1])
-    for col, label in zip(cols, ["Job ID", "Client", "What", "Owner", "Status", "Due"]):
+    for col, label in zip(cols, ["Job ID", "Client / progress", "What", "Owner", "Status", "Due"]):
         col.markdown(f"**{label}**")
 
     for j in rows:
         row_cols = st.columns([1.1, 2.0, 1.6, 1.2, 1.2, 1.1])
         if row_cols[0].button(ui.short_job_id(j["job_id"]), key=f"rec_{j['id']}", type="tertiary"):
             ui.go_to_job(j["id"])
-        row_cols[1].write(titlecase_name(j.get("client_name")) or "—")
+        if models.is_recurring_parent_job(j):
+            progress = models.recurring_job_progress(j["id"])
+            row_cols[1].write(f"{progress['completed']}/{progress['total']} clients")
+        else:
+            row_cols[1].write(titlecase_name(j.get("client_name")) or "—")
         row_cols[2].write(j["title"])
         row_cols[3].write(titlecase_name(j.get("owner_name")) or "—")
         status_label = (

@@ -581,21 +581,34 @@ this, so State can reuse them unchanged:
 
 CIT's own additions:
 
-- **Recurring jobs (generic, reusable).** Several CIT services run on a
-  cycle rather than one-off: Monthly VAT Returns and VAT & WHT Monitoring
-  monthly; Annual Return and Yearly VAT Analysis yearly. A new
-  `service_catalogue.recurring_frequency` column (`monthly`/`yearly`/null)
-  marks which; `models.create_next_cycle_job()` is called when such a job is
-  marked done and auto-creates next cycle's job for the same client, with
-  its due date rolled forward by `models._add_months()` (day-clamped
-  calendar-month arithmetic, no new dependency) and a bidirectional
-  `previous_cycle_job_id`/`next_cycle_job_id` link so it only ever fires
-  once per completed job. `models.list_recurring_jobs()` surfaces every
-  outstanding recurring job by due date on the CIT dashboard, so a monthly
-  VAT return or yearly filing can't quietly stop being generated. None of
-  this is CIT-specific — State's own monthly PAYE/WHT and payroll filings
-  can flip on the same behaviour by setting `recurring_frequency` in the
-  catalogue, no new code required.
+- **Recurring jobs (generic, reusable).** Several CIT and State services run
+  on a cycle rather than one-off: Monthly VAT Returns, VAT & WHT Monitoring,
+  Monthly PAYE & WHT Returns, Monthly Payroll and Pension monthly; Annual
+  Return and Yearly VAT Analysis yearly. A `service_catalogue.recurring_frequency`
+  column (`monthly`/`yearly`/null) marks which. Each period gets **one shared
+  checklist job** for the whole service (e.g. "Monthly VAT Returns — Oct
+  2026"), not one job per client — every client with that obligation is a row
+  in `recurring_job_client` (client, ticked, completed_at, completed_by),
+  and the job's own status rolls up from the rows: New with nothing ticked,
+  In progress with some, Done once every client is. `models.create_next_cycle_job()`
+  fires the moment a checklist job's last client is ticked (or, for a
+  job predating this — before a service became a shared checklist —
+  the moment that one client's own job is marked done) and either creates
+  or joins the shared job for the next period, due date rolled forward by
+  `models._add_months()` (day-clamped calendar-month arithmetic) and
+  normalised onto the first of that period via `models._recurring_period_anchor()`
+  so every client due the same month lands on the same job regardless of
+  small day-to-day drift in their own history. A `next_cycle_job_id` link
+  on the completed job keeps this idempotent. `models.list_recurring_jobs()`
+  still surfaces every outstanding recurring job by due date on the CIT
+  dashboard. Recurring jobs are prepaid annually and carry no invoicing step
+  at all — `models._get_or_create_recurring_parent()` applies a
+  `start_override` the moment a checklist job is created so the generic
+  invoice-before-work gate never blocks it, and `list_unbilled_jobs()`/
+  `firm_summary()`/`compute_risk()` all explicitly exclude these jobs from
+  billing-related lists and badges. None of this is CIT-specific — any
+  other module's own recurring filings pick it up unchanged by setting
+  `recurring_frequency` in the catalogue, no new code required.
 - **The TCC gate (`core/cit.py`, the CIT-specific rule).** A Tax Clearance
   Certificate job is blocked while the client has any other outstanding
   (not done/closed) CIT job — an unresolved audit, investigation, or unfiled

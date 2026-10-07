@@ -33,6 +33,7 @@ from core.constants import (
     STATUS_NEW,
 )
 from core.db import execute, execute_returning, query, query_one
+from core.tz import lagos_noon_utc, now_utc, today_lagos
 
 STALL_HOURS = 48
 DUE_SOON_DAYS = 3
@@ -176,6 +177,20 @@ def merge_clients(source_id: int, target_id: int) -> None:
     execute("UPDATE job SET client_id = %s WHERE client_id = %s", (target_id, source_id))
     execute("UPDATE compliance_item SET client_id = %s WHERE client_id = %s", (target_id, source_id))
     execute("UPDATE client_contact SET client_id = %s WHERE client_id = %s", (target_id, source_id))
+    # A recurring checklist job can carry at most one row per client (see
+    # recurring_job_client's UNIQUE (job_id, client_id)) — if both the
+    # surviving and the duplicate client already have their own row on the
+    # same shared job, reassigning source's row onto target would collide
+    # with target's own, so source's row is dropped there instead (target's
+    # own completion state for that job already stands).
+    execute(
+        """
+        DELETE FROM recurring_job_client a USING recurring_job_client b
+        WHERE a.client_id = %s AND b.client_id = %s AND a.job_id = b.job_id
+        """,
+        (source_id, target_id),
+    )
+    execute("UPDATE recurring_job_client SET client_id = %s WHERE client_id = %s", (target_id, source_id))
     execute("DELETE FROM client WHERE id = %s", (source_id,))
 
 
@@ -207,8 +222,9 @@ def delete_client(client_pk: int, force: bool = False) -> None:
     compliance item on file unless force=True — that's real business
     history, not something a cleanup action should silently erase.
 
-    force=True cascades: file register entries for this client are
-    removed (no cascade of their own — see schema), every job is
+    force=True cascades: file register entries and this client's own row
+    on any shared recurring checklist job are removed (neither cascades
+    on its own — see schema), every job is
     force-deleted (mirrors delete_job(force=True) — an invoice with other
     jobs on it survives with this job's line removed), any invoice left
     with no jobs on it is deleted outright (its own invoice_line and
@@ -230,6 +246,11 @@ def delete_client(client_pk: int, force: bool = False) -> None:
 
     if force:
         execute("DELETE FROM file_register WHERE client_id = %s", (client_pk,))
+        # This client's own jobs are force-deleted below — but a shared
+        # recurring checklist job (client_id IS NULL) isn't one of
+        # "this client's own jobs", so this client's row on it needs its
+        # own cleanup, same as file_register above.
+        execute("DELETE FROM recurring_job_client WHERE client_id = %s", (client_pk,))
         for job in query("SELECT id FROM job WHERE client_id = %s", (client_pk,)):
             delete_job(job["id"], force=True)
         # Every job on one of this client's invoices normally belongs to
@@ -335,8 +356,9 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
     if this person has any history attached (owned or created jobs, an
     invoice touch, a logged expense, a costing-sheet line, a posted
     comment, an invoice unapproval, a job/invoice code edit, a name/detail
-    field edit, or a compliance item they logged): that's real audit
-    trail, not something a cleanup action should silently erase — mirrors delete_job's own
+    field edit, a compliance item they logged, or a recurring checklist
+    row they completed): that's real audit trail, not something a
+    cleanup action should silently erase — mirrors delete_job's own
     invoice-history guard. Deactivate instead for anyone who's actually
     done work; delete is for a mistakenly-created account with nothing on
     it yet.
@@ -360,9 +382,10 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
             OR EXISTS(SELECT 1 FROM code_edit_log WHERE changed_by = %s)
             OR EXISTS(SELECT 1 FROM field_edit_log WHERE changed_by = %s)
             OR EXISTS(SELECT 1 FROM compliance_item WHERE created_by = %s)
+            OR EXISTS(SELECT 1 FROM recurring_job_client WHERE completed_by = %s)
         ) AS has_history
         """,
-        (staff_id,) * 15,
+        (staff_id,) * 16,
     )
     if row and row["has_history"]:
         if not force:
@@ -380,6 +403,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
         execute("UPDATE code_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
         execute("UPDATE field_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
         execute("UPDATE compliance_item SET created_by = NULL WHERE created_by = %s", (staff_id,))
+        execute("UPDATE recurring_job_client SET completed_by = NULL WHERE completed_by = %s", (staff_id,))
         execute("DELETE FROM job_comment WHERE author_id = %s", (staff_id,))
     execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
@@ -406,6 +430,7 @@ def merge_staff(source_id: int, target_id: int) -> None:
         execute(f"UPDATE invoice SET {col} = %s WHERE {col} = %s", (target_id, source_id))
     execute("UPDATE job_expense SET created_by = %s WHERE created_by = %s", (target_id, source_id))
     execute("UPDATE job_costing_line SET created_by = %s WHERE created_by = %s", (target_id, source_id))
+    execute("UPDATE recurring_job_client SET completed_by = %s WHERE completed_by = %s", (target_id, source_id))
     execute("UPDATE job_comment SET author_id = %s WHERE author_id = %s", (target_id, source_id))
     execute(
         "UPDATE module_specialist SET staff_id = %s WHERE staff_id = %s "
@@ -698,11 +723,14 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
 def list_unbilled_jobs() -> list:
     """Every not-yet-invoiced job across all clients, any status — Rabbi
     invoices up front, so a freshly logged job is exactly as invoiceable as
-    a finished one. Newest first."""
-    return query(
+    a finished one. Newest first. A recurring checklist job is excluded —
+    it's prepaid annually and never invoiced at all, so it has no place on
+    a "ready to invoice" list."""
+    jobs = query(
         _JOB_SELECT + " AND j.invoice_id IS NULL AND j.status <> 'dismissed' "
         "ORDER BY j.created_at DESC"
     )
+    return [j for j in jobs if not is_recurring_parent_job(j)]
 
 
 def find_potential_duplicate(client_id: int | None, service_type: str | None):
@@ -790,7 +818,8 @@ def delete_job(job_pk: int, force: bool = False) -> None:
     (invoice_line references it): that's real accounting history, not
     something a cleanup action should silently erase — hide it instead, or
     take it off the invoice first. job_extension, job_expense, job_comment,
-    job_costing_line and job_document all cascade automatically.
+    job_costing_line, job_document and recurring_job_client all cascade
+    automatically.
 
     `force=True` is the PIN-gated escape hatch (super admin only, checked
     in the view layer): it removes the job's own invoice_line rows instead
@@ -1534,7 +1563,12 @@ def compute_risk(job: dict) -> str:
     if status == STATUS_DONE:
         # Same "not yet invoiced" predicate as firm_summary()'s done_unbilled
         # count — a done job without an invoice is a distinct state from one
-        # that's fully wrapped up, not just "ready".
+        # that's fully wrapped up, not just "ready". A recurring checklist
+        # job never gets invoiced at all (prepaid annually, no invoicing
+        # step) — "unbilled" would misleadingly flag that as missing
+        # something, so it reads as plain done/ready instead.
+        if is_recurring_parent_job(job):
+            return RISK_GREEN
         return RISK_NAVY if job.get("invoice_id") is None else RISK_GREEN
     if status == STATUS_CLOSED:
         return RISK_GREEN
@@ -1749,12 +1783,88 @@ def _add_months(d: date, months: int) -> date:
     return date(year, month, day)
 
 
+def is_recurring_parent_job(job: dict) -> bool:
+    """A single checklist job covering every client with this recurring
+    obligation for one period (e.g. "Monthly VAT Returns — Oct 2026"),
+    instead of each client getting its own copy of the job. Distinguished
+    from an ordinary job purely by shape: its service recurs, and it has
+    no single client_id — a real client is never captured without one, so
+    this can never collide with a plain job."""
+    return bool(job.get("service_type")) and job.get("client_id") is None and bool(is_recurring_service(job["service_type"]))
+
+
+def _recurring_period_anchor(d: date, frequency: str) -> date:
+    """Normalises a due date down to the first day of its period (month for
+    monthly, year for yearly) — the key every client due in the same
+    period is grouped under, regardless of which exact day each one's own
+    history happens to carry forward. Keeps "everyone due in October"
+    landing on the same shared job even if their prior due dates drifted
+    a few days apart from each other."""
+    return date(d.year, d.month, 1) if frequency == "monthly" else date(d.year, 1, 1)
+
+
+def _recurring_parent_title(service_name: str, period_anchor: date, frequency: str) -> str:
+    period_label = period_anchor.strftime("%b %Y") if frequency == "monthly" else str(period_anchor.year)
+    return f"{service_name} — {period_label}"
+
+
+def _get_or_create_recurring_parent(
+    service_type: str, category: str, period_anchor: date, source: str, created_by: int, client_ids: list,
+) -> dict:
+    """Finds the open checklist job for (service, period) or creates one,
+    then ensures every client in client_ids has a row on it — idempotent,
+    so a client already on the list is left untouched. The one and only
+    place a recurring parent job is created, so every caller (an old-style
+    single-client job rolling forward, or a parent job itself completing)
+    converges on the same shared job instead of each spawning its own."""
+    parent = query_one(
+        "SELECT id FROM job WHERE service_type = %s AND sla_date = %s AND client_id IS NULL "
+        "AND status <> 'dismissed' ORDER BY id LIMIT 1",
+        (service_type, period_anchor),
+    )
+    if not parent:
+        frequency = is_recurring_service(service_type)
+        service = get_service(service_type)
+        title = _recurring_parent_title(service["name"] if service else service_type, period_anchor, frequency)
+        parent = create_job(
+            client_id=None, category=category, service_type=service_type,
+            title=title, description=None, owner_id=None, source=source,
+            created_by=created_by, sla_date=period_anchor, attributes={},
+        )
+        # Recurring jobs are prepaid annually — never invoiced — but the
+        # generic status guard still requires an approved invoice before a
+        # job can leave New, same as everyone else. This is the one
+        # existing escape hatch for that (a principal's start_override),
+        # applied by the system itself rather than requested by a person,
+        # since there's no invoicing step here to ever satisfy it normally.
+        set_start_override(
+            parent["id"], created_by,
+            "Recurring job — prepaid annually, carries no invoicing step.",
+        )
+
+    for cid in client_ids:
+        execute(
+            "INSERT INTO recurring_job_client (job_id, client_id) VALUES (%s, %s) "
+            "ON CONFLICT (job_id, client_id) DO NOTHING",
+            (parent["id"], cid),
+        )
+    return get_job(parent["id"])
+
+
 def create_next_cycle_job(completed_job_pk: int, actor_id: int | None = None) -> dict | None:
-    """If this job's service recurs on a schedule, spawn the next cycle's
-    job automatically the moment this one is marked done — so a recurring
-    obligation (this month's VAT return, this year's Annual Return) is
-    never left to memory. Idempotent per completed job: calling this twice
-    for the same job never creates two next-cycle jobs."""
+    """If this job's service recurs on a schedule, spawn (or join) the next
+    period's checklist job — so a recurring obligation (this month's VAT
+    return, this year's Annual Return) is never left to memory. Idempotent
+    per completed job: calling this twice for the same job never
+    contributes it twice.
+
+    A recurring parent job (client_id IS NULL — see is_recurring_parent_job)
+    reaching this point means every client on its checklist just finished,
+    so the whole roster rolls forward together onto one new shared job for
+    the next period. An old-style single-client job (from before a service
+    became a shared checklist, or one captured individually outside it)
+    instead just contributes its one client onto that same shared job —
+    joining it if another client got there first, or starting it if not."""
     job = get_job(completed_job_pk)
     if not job or not job["service_type"]:
         return None
@@ -1766,34 +1876,147 @@ def create_next_cycle_job(completed_job_pk: int, actor_id: int | None = None) ->
     if attrs.get("next_cycle_job_id"):
         return None
 
+    if job["client_id"] is None:
+        client_ids = [
+            r["client_id"] for r in
+            query("SELECT client_id FROM recurring_job_client WHERE job_id = %s", (job["id"],))
+        ]
+    else:
+        client_ids = [job["client_id"]]
+    if not client_ids:
+        return None
+
     base = job["sla_date"] or date.today()
     next_due = _add_months(base, 1 if frequency == "monthly" else 12)
+    period_anchor = _recurring_period_anchor(next_due, frequency)
 
-    carried_attrs = {
-        k: v for k, v in attrs.items()
-        if k not in ("next_cycle_job_id", "previous_cycle_job_id", "active_gate", "desk_exam_job_id")
-    }
-    next_job = create_job(
-        client_id=job["client_id"], category=job["category"], service_type=job["service_type"],
-        title=job["title"], description=job["description"], owner_id=job["owner_id"],
-        source=job["source"], created_by=actor_id or job["created_by"], sla_date=next_due,
-        attributes=carried_attrs,
+    next_parent = _get_or_create_recurring_parent(
+        job["service_type"], job["category"], period_anchor, job["source"],
+        actor_id or job["created_by"], client_ids,
     )
 
-    next_attrs = get_job_extension(next_job["id"])
-    next_attrs["previous_cycle_job_id"] = job["id"]
-    set_job_extension(next_job["id"], next_attrs)
-
-    attrs["next_cycle_job_id"] = next_job["id"]
+    attrs["next_cycle_job_id"] = next_parent["id"]
     set_job_extension(job["id"], attrs)
 
-    if next_job["owner_id"]:
+    if next_parent["owner_id"]:
         create_notification(
-            next_job["owner_id"], "recurring_job_created", "job", next_job["id"],
-            f"{next_job['job_id']} auto-created — next {frequency} cycle for "
-            f"{next_job['client_name'] or '—'} (due {next_due.isoformat()})",
+            next_parent["owner_id"], "recurring_job_created", "job", next_parent["id"],
+            f"{next_parent['job_id']} auto-created — next {frequency} cycle (due {period_anchor.isoformat()})",
         )
-    return next_job
+    return next_parent
+
+
+def list_recurring_job_clients(job_pk: int) -> list:
+    """Every client row on a recurring checklist job, newest-added-last —
+    the actual checklist a job's own detail page renders."""
+    return query(
+        """
+        SELECT rjc.*, c.name AS client_name, s.name AS completed_by_name
+        FROM recurring_job_client rjc
+        JOIN client c ON c.id = rjc.client_id
+        LEFT JOIN staff s ON s.id = rjc.completed_by
+        WHERE rjc.job_id = %s
+        ORDER BY c.name
+        """,
+        (job_pk,),
+    )
+
+
+def recurring_job_progress(job_pk: int) -> dict:
+    """{"completed": n, "total": m} for a recurring checklist job — what
+    the "7/12 completed" progress reads from."""
+    row = query_one(
+        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE completed) AS completed "
+        "FROM recurring_job_client WHERE job_id = %s",
+        (job_pk,),
+    )
+    return {"total": row["total"], "completed": row["completed"]}
+
+
+def _sync_recurring_rollup(job_pk: int, actor_id: int | None = None) -> bool:
+    """Recomputes a recurring checklist job's own status from its client
+    rows — New with nothing ticked, In progress with some, Done once every
+    client is — through the same set_status() every other job's status
+    change goes through, so notifications/started_at/completed_at/
+    dependent-unblocking all still fire normally. Even when the rollup
+    status doesn't cross a boundary, status_changed_at is still refreshed:
+    a tick is the job being actioned today regardless of whether the
+    headline status just happened to already be "in progress". Returns
+    True exactly when this call is what completed the whole checklist —
+    the one moment the caller should spawn the next period's job."""
+    progress = recurring_job_progress(job_pk)
+    if progress["total"] == 0 or progress["completed"] == 0:
+        new_status = STATUS_NEW
+    elif progress["completed"] < progress["total"]:
+        new_status = STATUS_IN_PROGRESS
+    else:
+        new_status = STATUS_DONE
+
+    job = get_job(job_pk)
+    was_done = job["status"] == STATUS_DONE
+    if new_status != job["status"]:
+        set_status(job_pk, new_status, actor_id=actor_id)
+    else:
+        execute("UPDATE job SET status_changed_at = now() WHERE id = %s", (job_pk,))
+    return (not was_done) and new_status == STATUS_DONE
+
+
+def set_recurring_job_client_completed(
+    job_pk: int, client_id: int, completed: bool, actor_id: int | None = None,
+) -> bool:
+    """Tick/untick one client's row on a recurring checklist job. Ticking
+    stores completed_at as now (UTC) — Africa/Lagos's "today" by
+    construction — and who did it; unticking clears both. Returns whatever
+    _sync_recurring_rollup returns: True exactly when this tick just
+    completed the whole checklist, so the caller knows to spawn the next
+    period's job."""
+    if completed:
+        execute(
+            "UPDATE recurring_job_client SET completed = TRUE, completed_at = now(), completed_by = %s "
+            "WHERE job_id = %s AND client_id = %s",
+            (actor_id, job_pk, client_id),
+        )
+    else:
+        execute(
+            "UPDATE recurring_job_client SET completed = FALSE, completed_at = NULL, completed_by = NULL "
+            "WHERE job_id = %s AND client_id = %s",
+            (job_pk, client_id),
+        )
+    return _sync_recurring_rollup(job_pk, actor_id=actor_id)
+
+
+def set_recurring_job_client_date(job_pk: int, client_id: int, new_date: date, actor_id: int | None = None) -> None:
+    """Edits the completion date of an already-ticked client row — e.g.
+    back-dating it to when the filing actually happened. Only ever touches
+    an already-completed row; editing the date doesn't itself tick or
+    untick anything, so the rollup status can't change, but the touch
+    still counts as the job being actioned today."""
+    execute(
+        "UPDATE recurring_job_client SET completed_at = %s, completed_by = %s "
+        "WHERE job_id = %s AND client_id = %s AND completed = TRUE",
+        (lagos_noon_utc(new_date), actor_id, job_pk, client_id),
+    )
+    execute("UPDATE job SET status_changed_at = now() WHERE id = %s", (job_pk,))
+
+
+def list_pending_recurring_obligations_for_client(client_id: int, category: str | None = None) -> list:
+    """Every open recurring checklist job where this client's own row isn't
+    ticked yet — the parent-job equivalent of "this client still has an
+    open recurring job for this service," now that the job covers many
+    clients instead of one. A plain client_id-filtered job query can't see
+    these (the parent's own client_id is NULL), which matters wherever
+    something needs to know a specific client's outstanding obligations —
+    the CIT TCC gate, for one."""
+    sql = (
+        _JOB_SELECT + " AND j.client_id IS NULL AND j.status NOT IN ('done', 'closed') "
+        "AND EXISTS (SELECT 1 FROM recurring_job_client rjc WHERE rjc.job_id = j.id "
+        "AND rjc.client_id = %s AND rjc.completed = FALSE)"
+    )
+    params: list = [client_id]
+    if category:
+        sql += " AND j.category = %s"
+        params.append(category)
+    return query(sql, tuple(params))
 
 
 def list_recurring_jobs(category: str | None = None) -> list:
@@ -1889,7 +2112,7 @@ def firm_summary() -> dict:
         by_status[j["status"]] = by_status.get(j["status"], 0) + 1
         if is_stalled(j):
             stalled += 1
-        if j["status"] == STATUS_DONE and j["invoice_id"] is None:
+        if j["status"] == STATUS_DONE and j["invoice_id"] is None and not is_recurring_parent_job(j):
             done_unbilled += 1
         if compute_risk(j) == RISK_RED:
             red_flags += 1

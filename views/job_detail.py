@@ -11,6 +11,7 @@ import streamlit as st
 from core import cit
 from core import immigration
 from core import models
+from core import tz
 from core import ui
 from core.constants import (
     CATEGORY_LABELS,
@@ -58,6 +59,18 @@ def render(user: dict, job_pk: int) -> None:
 
     if user["role"] == "client" or (user["role"] == ROLE_SPECIALIST and job["owner_id"] != user["id"]):
         st.error("You don't have access to this job.")
+        return
+
+    # A recurring obligation (Monthly VAT Returns, VAT & WHT Monitoring,
+    # Annual Return, ...) is now one shared checklist job per period
+    # covering every client due that period, not one job per client — a
+    # completely different shape of page (a client-by-client checklist,
+    # no invoice, no single owner's start-job gate) from every other job,
+    # so it gets its own render path entirely rather than threading
+    # special cases through the one below. Nothing past this point changes
+    # for any job that isn't one of these.
+    if models.is_recurring_parent_job(job):
+        _render_recurring_parent(job, user)
         return
 
     key_prefix = f"jd_{job['id']}"
@@ -149,6 +162,130 @@ def render(user: dict, job_pk: int) -> None:
     if user["role"] == ROLE_SUPER_ADMIN:
         st.divider()
         _danger_zone(job, user)
+
+
+def _render_recurring_parent(job: dict, user: dict) -> None:
+    """A recurring obligation's shared checklist job: every client due this
+    period, one row each, ticked off as their filing is done — the status
+    shown up top rolls up from the checklist itself (New with nothing
+    ticked, In progress with some, Done once every client is), not from
+    any action taken on the job directly. No invoice section anywhere on
+    this page: recurring jobs are prepaid annually and carry no invoicing
+    step at all."""
+    _header(job, user)
+    st.write("")
+
+    key_prefix = f"jdr_{job['id']}"
+    editable_roles = (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+    if user["role"] in editable_roles:
+        _push_control(job, key_prefix, user)
+
+    _recurring_parent_info(job)
+    st.divider()
+    _recurring_checklist(job, user)
+    st.divider()
+    _comments(job, user, locked=False)
+
+    if user["role"] in editable_roles:
+        st.divider()
+        _reassign_owner_control(job, key_prefix, user)
+        st.divider()
+        _edit_job_details_control(job, key_prefix, user)
+
+    if user["role"] == ROLE_SUPER_ADMIN:
+        st.divider()
+        _danger_zone(job, user)
+
+
+def _recurring_parent_info(job: dict) -> None:
+    progress = models.recurring_job_progress(job["id"])
+    frequency = models.is_recurring_service(job["service_type"]) if job["service_type"] else None
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write(f"**Service:** {job['service_name'] or '—'}")
+        st.write(f"**Category:** {humanize(job['category'], CATEGORY_LABELS)}")
+        st.write(f"**Recurs:** {humanize(frequency) if frequency else '—'}")
+    with c2:
+        st.write(f"**Logged:** {job['created_at'].strftime('%d %b %Y')}")
+        st.write(f"**Due:** {job['sla_date'].isoformat() if job['sla_date'] else '—'}")
+        st.write(f"**Progress:** {progress['completed']}/{progress['total']} completed")
+
+    next_id = models.get_job_extension(job["id"]).get("next_cycle_job_id")
+    if next_id:
+        next_job = models.get_job(next_id)
+        if next_job and st.button(
+            f"Next cycle: {next_job['job_id']}", key=f"jdr_{job['id']}_nextcycle", type="tertiary",
+        ):
+            ui.go_to_job(next_job["id"])
+
+
+_RECURRING_CHECKLIST_WIDTHS = [0.4, 2.4, 1.8]
+
+
+def _recurring_checklist(job: dict, user: dict) -> None:
+    st.markdown("#### Client checklist")
+    rows = models.list_recurring_job_clients(job["id"])
+    if not rows:
+        st.caption("No clients on this period's list yet.")
+        return
+
+    editable = user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) or (
+        user["role"] == ROLE_SPECIALIST and job["owner_id"] == user["id"]
+    )
+
+    header = st.columns(_RECURRING_CHECKLIST_WIDTHS)
+    for col, label in zip(header, ["", "Client", "Date completed"]):
+        col.markdown(f"**{label}**")
+
+    for r in rows:
+        cols = st.columns(_RECURRING_CHECKLIST_WIDTHS)
+        checked = cols[0].checkbox(
+            "", value=r["completed"], key=f"recck_{r['id']}", disabled=not editable, label_visibility="collapsed",
+        )
+        if cols[1].button(
+            titlecase_name(r["client_name"]) or "—", key=f"recck_client_{r['id']}", type="tertiary",
+        ):
+            ui.go_to_client(r["client_id"])
+
+        if checked != r["completed"]:
+            _apply_recurring_tick(job, r["client_id"], checked, user["id"])
+            return
+
+        if r["completed"]:
+            current_date = tz.to_lagos_date(r["completed_at"]) or tz.today_lagos()
+            new_date = cols[2].date_input(
+                "Date completed", value=current_date, key=f"reckdate_{r['id']}",
+                disabled=not editable, label_visibility="collapsed",
+            )
+            if editable and new_date != current_date:
+                models.set_recurring_job_client_date(job["id"], r["client_id"], new_date, actor_id=user["id"])
+                st.toast("Saved.", icon="✅")
+                st.rerun()
+            cols[2].caption(f"Completed by {titlecase_name(r.get('completed_by_name')) or '—'}")
+        else:
+            cols[2].write("—")
+
+
+def _apply_recurring_tick(job: dict, client_id: int, completed: bool, actor_id: int) -> None:
+    """Generic: tick/untick this client and let the checklist job's own
+    status roll up from the result. Mirrors _apply_status's own
+    generic-then-module-specific structure: the CIT Annual Return ->
+    Desk Examination follow-up now fires per client as their row
+    completes (not per job), and the next period's checklist job is
+    spawned the moment the last client on this one is ticked."""
+    just_completed_all = models.set_recurring_job_client_completed(
+        job["id"], client_id, completed, actor_id=actor_id,
+    )
+    if completed and job["category"] == "cit" and job["service_type"] == cit.ANNUAL_RETURN_SERVICE_CODE:
+        cit.spawn_desk_examination_for_client(job, client_id, actor_id=actor_id)
+    if job["category"] == "cit":
+        cit.sync_tcc_gate(actor_id=actor_id)
+    if just_completed_all:
+        models.create_next_cycle_job(job["id"], actor_id=actor_id)
+
+    st.toast("Saved.", icon="✅")
+    st.rerun()
 
 
 def _header(job: dict, user: dict) -> None:

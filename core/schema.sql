@@ -594,3 +594,26 @@ CREATE TABLE IF NOT EXISTS file_register (
 CREATE INDEX IF NOT EXISTS idx_file_register_client ON file_register(client_id);
 CREATE INDEX IF NOT EXISTS idx_file_register_job ON file_register(job_id);
 CREATE INDEX IF NOT EXISTS idx_file_register_out ON file_register(out_at DESC) WHERE returned_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- RECURRING JOB CLIENT — a recurring service's job for one period (e.g.
+-- "Monthly VAT Returns — Oct 2026") now covers every client with that
+-- obligation in one parent job (job.client_id IS NULL) instead of each
+-- client getting its own copy. This is the checklist: one row per client,
+-- ticked off as each one's filing is done. completed_at is always stored in
+-- UTC (see core/tz.py's now_utc/lagos_noon_utc) and only ever converted to
+-- Africa/Lagos for display (core/tz.py's fmt/to_lagos_date).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS recurring_job_client (
+    id              SERIAL PRIMARY KEY,
+    job_id          INTEGER NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+    client_id       INTEGER NOT NULL REFERENCES client(id),
+    completed       BOOLEAN NOT NULL DEFAULT FALSE,
+    completed_at    TIMESTAMPTZ,
+    completed_by    INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (job_id, client_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_job_client_job_id ON recurring_job_client(job_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_job_client_client_id ON recurring_job_client(client_id);

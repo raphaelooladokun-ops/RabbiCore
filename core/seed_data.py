@@ -79,8 +79,14 @@ SERVICE_CATALOGUE = [
 
     # ---- PILLAR 4 — State Matters --------------------------------------------
     {"code": "STATE-PAYE-REG", "pillar": "State", "name": "STATE — PAYE Registration", "fields": []},
-    {"code": "STATE-PAYE-WHT-MONTHLY", "pillar": "State", "name": "STATE — Monthly PAYE & WHT Returns", "fields": []},
-    {"code": "STATE-PAYROLL-MONTHLY", "pillar": "State", "name": "STATE — Monthly Payroll", "fields": []},
+    {
+        "code": "STATE-PAYE-WHT-MONTHLY", "pillar": "State", "name": "STATE — Monthly PAYE & WHT Returns",
+        "fields": [], "recurring_frequency": "monthly",
+    },
+    {
+        "code": "STATE-PAYROLL-MONTHLY", "pillar": "State", "name": "STATE — Monthly Payroll",
+        "fields": [], "recurring_frequency": "monthly",
+    },
     {
         "code": "STATE-PAYE-ANNUAL-RETURN", "pillar": "State", "name": "STATE — PAYE Annual Return",
         "fields": [_select("location", "Location", ["Lagos", "Outside Lagos"])],
@@ -108,7 +114,10 @@ SERVICE_CATALOGUE = [
     {"code": "STATE-TCC-PAYE", "pillar": "State", "name": "STATE — Processing of TCC (PAYE Scheme)", "fields": []},
     {"code": "STATE-NSITF", "pillar": "State", "name": "STATE — NSITF", "fields": []},
     {"code": "STATE-ITF", "pillar": "State", "name": "STATE — ITF", "fields": []},
-    {"code": "STATE-PENSION", "pillar": "State", "name": "STATE — Pension", "fields": []},
+    {
+        "code": "STATE-PENSION", "pillar": "State", "name": "STATE — Pension",
+        "fields": [], "recurring_frequency": "monthly",
+    },
     {"code": "STATE-BPR", "pillar": "State", "name": "STATE — BPR (Business Premises Registration)", "fields": []},
     {"code": "STATE-DEV-LEVY", "pillar": "State", "name": "STATE — Development Levy (DL)", "fields": []},
     {"code": "STATE-LAND-USE-CHARGES", "pillar": "State", "name": "STATE — Land Use Charges", "fields": []},

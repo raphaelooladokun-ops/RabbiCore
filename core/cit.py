@@ -46,16 +46,28 @@ def list_outstanding_obligations(client_id: int | None, exclude_job_pk: int | No
     (audits, investigations, desk exams, unfiled returns, registrations in
     progress...), not just the three named examples, matching the brief's
     broader "other outstanding CIT obligations." TCC's own gate reads this
-    list directly; the CIT dashboard's panel does too."""
+    list directly; the CIT dashboard's panel does too.
+
+    A recurring obligation (Monthly VAT Returns, VAT & WHT Monitoring,
+    Annual Return) now lives on a shared checklist job covering every
+    client due that period, rather than this client's own copy of it — so
+    a plain client_id-filtered job query can't see it. This client's own
+    unticked row on one of those is exactly the same "unfiled return" this
+    gate exists to catch, just represented differently now."""
     if not client_id:
         return []
     jobs = models.list_jobs(client_id=client_id, category="cit", exclude_dismissed=True)
-    return [
+    outstanding = [
         j for j in jobs
         if j["service_type"] != TCC_SERVICE_CODE
         and j["status"] not in (STATUS_DONE, STATUS_CLOSED)
         and j["id"] != exclude_job_pk
     ]
+    outstanding += [
+        j for j in models.list_pending_recurring_obligations_for_client(client_id, category="cit")
+        if j["id"] != exclude_job_pk
+    ]
+    return outstanding
 
 
 def is_tcc_gate_active(job: dict) -> bool:
@@ -147,4 +159,44 @@ def spawn_desk_examination(annual_return_job_pk: int, actor_id: int | None = Non
             desk_exam["owner_id"], "desk_exam_triggered", "job", desk_exam["id"],
             f"{desk_exam['job_id']} auto-created — Desk Examination following Annual Return {job['job_id']}",
         )
+    return desk_exam
+
+
+def spawn_desk_examination_for_client(parent_job: dict, client_id: int, actor_id: int | None = None) -> dict | None:
+    """The same follow-up as spawn_desk_examination, for an Annual Return
+    that's now a shared checklist job covering many clients: each client's
+    own filing still gets its own Desk Examination the moment THEIR row is
+    ticked, exactly as it did back when Annual Return was a single-client
+    job and marking the whole thing done triggered this. Idempotent per
+    (parent job, client) — tracked in the parent's own job_extension as a
+    client_id -> desk_exam_job_id map, since there's no longer just the
+    one desk_exam_job_id a single-client job carries."""
+    if parent_job["service_type"] != ANNUAL_RETURN_SERVICE_CODE:
+        return None
+
+    attrs = models.get_job_extension(parent_job["id"])
+    desk_exam_map = attrs.get("desk_exam_job_ids", {})
+    if str(client_id) in desk_exam_map:
+        return None
+
+    client = models.get_client(client_id)
+    desk_exam = models.create_job(
+        client_id=client_id, category="cit", service_type=DESK_EXAM_SERVICE_CODE,
+        title=f"Desk Examination — following {parent_job['job_id']}",
+        description=(
+            f"Auto-created: NRS desk examination following {client['name'] if client else 'this client'}'s "
+            f"Annual Return filing on {parent_job['job_id']}."
+        ),
+        owner_id=None, source=parent_job["source"], created_by=actor_id or parent_job["created_by"],
+        sla_date=None, attributes={},
+    )
+
+    desk_attrs = models.get_job_extension(desk_exam["id"])
+    desk_attrs["triggered_by_annual_return_job_id"] = parent_job["id"]
+    models.set_job_extension(desk_exam["id"], desk_attrs)
+
+    desk_exam_map[str(client_id)] = desk_exam["id"]
+    attrs["desk_exam_job_ids"] = desk_exam_map
+    models.set_job_extension(parent_job["id"], attrs)
+
     return desk_exam

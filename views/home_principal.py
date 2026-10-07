@@ -59,7 +59,10 @@ def render(user: dict) -> None:
 
     st.write("")
     st.markdown("#### Done — awaiting invoice")
-    unbilled = [j for j in jobs if j["status"] == "done" and j["invoice_id"] is None]
+    unbilled = [
+        j for j in jobs
+        if j["status"] == "done" and j["invoice_id"] is None and not models.is_recurring_parent_job(j)
+    ]
     ui.jobs_row_table(unbilled, key_prefix="principal_unbilled")
 
     # Manager and super_admin also have a separate Home page (home_admin.py)
