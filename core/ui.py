@@ -265,18 +265,24 @@ def updates_feed(limit: int = 15) -> None:
     if not updates:
         st.caption("No specialist comments yet.")
     for c in updates:
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            st.markdown(
-                f"**{titlecase_name(c['author_name'])}** on **{short_job_id(c['job_code'])}** — "
-                f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
-                f"<span style='color:#8A94A6'>{c['created_at'].strftime('%d %b %Y, %H:%M')}</span>",
-                unsafe_allow_html=True,
-            )
-            st.write(c["body"])
-        with col2:
-            if st.button("Open job", key=f"updatefeed_{c['id']}"):
-                go_to_job(c["job_pk"])
+        box = st.container(border=True) if (c["is_ec_action_point"] and not c["action_resolved"]) else st.container()
+        with box:
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                if c["is_ec_action_point"] and not c["action_resolved"]:
+                    st.markdown('<span class="rc-badge rc-badge-amber">📌 EC action — open</span>', unsafe_allow_html=True)
+                elif c["is_ec_action_point"]:
+                    st.markdown('<span class="rc-badge rc-badge-grey">📌 EC action — resolved</span>', unsafe_allow_html=True)
+                st.markdown(
+                    f"**{titlecase_name(c['author_name'])}** on **{short_job_id(c['job_code'])}** — "
+                    f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
+                    f"<span style='color:#8A94A6'>{c['created_at'].strftime('%d %b %Y, %H:%M')}</span>",
+                    unsafe_allow_html=True,
+                )
+                st.write(c["body"])
+            with col2:
+                if st.button("Open job", key=f"updatefeed_{c['id']}"):
+                    go_to_job(c["job_pk"])
         st.divider()
 
 

@@ -993,29 +993,86 @@ def _expenses(job: dict, user: dict) -> None:
                     st.rerun()
 
 
+_EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER)
+
+
 def _comments(job: dict, user: dict, *, locked: bool = False) -> None:
     st.markdown("#### Comments")
     if locked:
         st.caption("🔒 Locked until you start this job.")
     else:
+        # EC (principal) resolves action points, so raising one isn't
+        # offered to them — flagging something for yourself to resolve
+        # doesn't make sense; every other role can raise one.
+        can_raise = user["role"] != ROLE_PRINCIPAL
+        # The checkbox's own key can't be written to after it's rendered
+        # (Streamlit forbids mutating a widget's state post-instantiation
+        # in the same run) — so clearing it after a post bumps this
+        # generation counter instead, which gives the checkbox a fresh key
+        # next render and so a fresh, unticked default.
+        gen_key = f"ecflag_gen_{job['id']}"
+        flag_key = f"ecflag_{job['id']}_{st.session_state.get(gen_key, 0)}"
+        if can_raise:
+            st.checkbox("📌 Needs EC action / decision", key=flag_key)
+        is_action = can_raise and st.session_state.get(flag_key, False)
+
         with st.form(key=f"comment_form_{job['id']}", clear_on_submit=True):
-            body = st.text_area(
-                "Add a comment", label_visibility="collapsed", placeholder="Add a comment…",
-                key=f"comment_body_{job['id']}",
-            )
+            if is_action:
+                body = st.text_input(
+                    "What's needed from EC? *", key=f"comment_body_action_{job['id']}",
+                    placeholder="One line — the decision or action needed",
+                )
+            else:
+                body = st.text_area(
+                    "Add a comment", label_visibility="collapsed", placeholder="Add a comment…",
+                    key=f"comment_body_{job['id']}",
+                )
             if st.form_submit_button("Post comment"):
-                if body.strip():
-                    models.add_job_comment(job["id"], user["id"], body.strip())
+                if not body.strip():
+                    st.error("Enter what's needed from EC." if is_action else "Enter a comment.")
+                else:
+                    models.add_job_comment(job["id"], user["id"], body.strip(), is_ec_action_point=is_action)
+                    st.session_state[gen_key] = st.session_state.get(gen_key, 0) + 1
                     st.toast("Comment posted.", icon="✅")
                     st.rerun()
 
     comments = models.list_job_comments(job["id"])
     if not comments:
         st.caption("No comments yet.")
+    can_resolve = user["role"] in _EC_RESOLVER_ROLES
     for c in comments:
+        _render_comment(c, user["id"] if can_resolve else None)
+
+
+def _render_comment(c: dict, resolver_id: int | None) -> None:
+    is_open_action = c["is_ec_action_point"] and not c["action_resolved"]
+    box = st.container(border=True) if is_open_action else st.container()
+    with box:
+        if is_open_action:
+            age = models.format_duration(c["action_opened_at"], tz.now_utc())
+            st.markdown(f'<span class="rc-badge rc-badge-amber">📌 EC action — waiting {age}</span>', unsafe_allow_html=True)
+        elif c["is_ec_action_point"]:
+            st.markdown('<span class="rc-badge rc-badge-grey">📌 EC action — resolved</span>', unsafe_allow_html=True)
+
         st.markdown(f"**{titlecase_name(c['author_name'])}** · {c['created_at'].strftime('%d %b %Y, %H:%M')}")
         st.write(c["body"])
-        st.divider()
+
+        if is_open_action and resolver_id is not None:
+            with st.form(key=f"resolve_form_{c['id']}"):
+                note = st.text_input("Resolution — what's the decision? *", key=f"resolve_note_{c['id']}")
+                if st.form_submit_button("Resolve"):
+                    if not note.strip():
+                        st.error("Enter the decision or answer before resolving.")
+                    else:
+                        models.resolve_ec_action_point(c["id"], resolver_id, note.strip())
+                        st.toast("Action point resolved.", icon="✅")
+                        st.rerun()
+        elif c["is_ec_action_point"] and c["action_resolved"]:
+            st.caption(
+                f"Resolved by {titlecase_name(c.get('resolved_by_name')) or '—'} on "
+                f"{tz.fmt(c['action_resolved_at'])} — {c['action_resolution_note']}"
+            )
+    st.divider()
 
 
 def _danger_zone(job: dict, user: dict) -> None:

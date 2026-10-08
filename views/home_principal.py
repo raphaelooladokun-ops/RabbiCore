@@ -7,6 +7,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core import models
+from core import tz
 from core import ui
 from core.constants import RISK_RED, ROLE_PRINCIPAL, STATUS_LABELS_SHORT, humanize, titlecase_name
 
@@ -17,6 +18,12 @@ STATUS_FILTER_KEY = "principal_status_filter"
 def render(user: dict) -> None:
     ui.page_header(f"Good to see you, {titlecase_name(user['name']).split()[0]}", "Firm-wide oversight — every job, every client.")
     ui.risk_legend()
+
+    # Every role that lands on Overview (principal, manager, super_admin)
+    # is one of the three roles that can resolve an EC action point, so no
+    # extra role check is needed here — pinned above everything else,
+    # oldest first, exactly like the escalated queue it is.
+    _ec_action_queue(user)
 
     summary = models.firm_summary()
     jobs = models.list_jobs(exclude_dismissed=True)
@@ -72,3 +79,35 @@ def render(user: dict) -> None:
     if user["role"] == ROLE_PRINCIPAL:
         st.write("")
         ui.updates_feed()
+
+
+def _ec_action_queue(user: dict) -> None:
+    """Every open EC action point, oldest first, each showing how long
+    it's been waiting — resolving needs a short decision note and never
+    touches the job's own status, only the flag."""
+    open_points = models.list_open_ec_action_points()
+    if not open_points:
+        return
+    st.markdown(f"#### 📌 EC action points — {len(open_points)} open")
+    st.caption("Oldest first. Resolving requires a short decision note and never changes the job's own status.")
+    for c in open_points:
+        age = models.format_duration(c["action_opened_at"], tz.now_utc())
+        with st.container(border=True):
+            st.markdown(f'<span class="rc-badge rc-badge-amber">waiting {age}</span>', unsafe_allow_html=True)
+            if st.button(
+                f"{ui.short_job_id(c['job_code'])} — {titlecase_name(c['client_name']) or '—'}: {c['job_title']}",
+                key=f"ecq_open_{c['id']}", type="tertiary",
+            ):
+                ui.go_to_job(c["job_pk"])
+            st.write(f"**{titlecase_name(c['author_name'])}:** {c['body']}")
+            with st.form(key=f"ecq_resolve_{c['id']}"):
+                note = st.text_input("Resolution — what's the decision? *", key=f"ecq_note_{c['id']}")
+                if st.form_submit_button("Resolve"):
+                    if not note.strip():
+                        st.error("Enter the decision or answer before resolving.")
+                    else:
+                        models.resolve_ec_action_point(c["id"], user["id"], note.strip())
+                        st.toast("Resolved.", icon="✅")
+                        st.rerun()
+    st.write("")
+    st.divider()

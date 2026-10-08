@@ -377,7 +377,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
                                               OR rejected_by = %s OR sent_by = %s)
             OR EXISTS(SELECT 1 FROM job_expense WHERE created_by = %s)
             OR EXISTS(SELECT 1 FROM job_costing_line WHERE created_by = %s)
-            OR EXISTS(SELECT 1 FROM job_comment WHERE author_id = %s)
+            OR EXISTS(SELECT 1 FROM job_comment WHERE author_id = %s OR action_resolved_by = %s)
             OR EXISTS(SELECT 1 FROM invoice_unapproval_log WHERE actor_id = %s)
             OR EXISTS(SELECT 1 FROM code_edit_log WHERE changed_by = %s)
             OR EXISTS(SELECT 1 FROM field_edit_log WHERE changed_by = %s)
@@ -385,7 +385,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
             OR EXISTS(SELECT 1 FROM recurring_job_client WHERE completed_by = %s)
         ) AS has_history
         """,
-        (staff_id,) * 16,
+        (staff_id,) * 17,
     )
     if row and row["has_history"]:
         if not force:
@@ -404,6 +404,7 @@ def delete_staff(staff_id: int, force: bool = False) -> None:
         execute("UPDATE field_edit_log SET changed_by = NULL WHERE changed_by = %s", (staff_id,))
         execute("UPDATE compliance_item SET created_by = NULL WHERE created_by = %s", (staff_id,))
         execute("UPDATE recurring_job_client SET completed_by = NULL WHERE completed_by = %s", (staff_id,))
+        execute("UPDATE job_comment SET action_resolved_by = NULL WHERE action_resolved_by = %s", (staff_id,))
         execute("DELETE FROM job_comment WHERE author_id = %s", (staff_id,))
     execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
@@ -432,6 +433,7 @@ def merge_staff(source_id: int, target_id: int) -> None:
     execute("UPDATE job_costing_line SET created_by = %s WHERE created_by = %s", (target_id, source_id))
     execute("UPDATE recurring_job_client SET completed_by = %s WHERE completed_by = %s", (target_id, source_id))
     execute("UPDATE job_comment SET author_id = %s WHERE author_id = %s", (target_id, source_id))
+    execute("UPDATE job_comment SET action_resolved_by = %s WHERE action_resolved_by = %s", (target_id, source_id))
     execute(
         "UPDATE module_specialist SET staff_id = %s WHERE staff_id = %s "
         "AND category NOT IN (SELECT category FROM module_specialist WHERE staff_id = %s)",
@@ -1475,12 +1477,16 @@ def job_costing_totals(job_id: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-job comment thread — lightweight, no edits or threading.
+# Per-job comment thread — lightweight, no edits or threading. A comment
+# can also be raised as an EC action point (is_ec_action_point) instead of
+# a plain update — see resolve_ec_action_point / list_open_ec_action_points
+# below for the escalation half of that.
 # ---------------------------------------------------------------------------
-def add_job_comment(job_id: int, author_id: int, body: str) -> None:
+def add_job_comment(job_id: int, author_id: int, body: str, is_ec_action_point: bool = False) -> None:
     execute(
-        "INSERT INTO job_comment (job_id, author_id, body) VALUES (%s, %s, %s)",
-        (job_id, author_id, body),
+        "INSERT INTO job_comment (job_id, author_id, body, is_ec_action_point, action_opened_at) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (job_id, author_id, body, is_ec_action_point, now_utc() if is_ec_action_point else None),
     )
     _notify_comment(job_id, author_id)
 
@@ -1488,7 +1494,10 @@ def add_job_comment(job_id: int, author_id: int, body: str) -> None:
 def _notify_comment(job_pk: int, author_id: int) -> None:
     """Everyone with a stake in the job — its owner, every admin, manager,
     principal and super_admin — gets told about a new comment, so a note
-    posted by one role doesn't sit unseen by the others."""
+    posted by one role doesn't sit unseen by the others. Covers an EC
+    action point too (principal/manager/super_admin — the roles that can
+    resolve one — are already in this same recipient list), so raising one
+    needs no separate notification of its own."""
     job = query_one(
         "SELECT j.owner_id, j.job_id, j.title, c.name AS client_name, s.name AS author_name "
         "FROM job j LEFT JOIN client c ON c.id = j.client_id JOIN staff s ON s.id = %s "
@@ -1511,17 +1520,88 @@ def _notify_comment(job_pk: int, author_id: int) -> None:
         create_notification(staff_id, "comment", "job", job_pk, message)
 
 
+def resolve_ec_action_point(comment_id: int, actor_id: int, note: str) -> None:
+    """Resolve an open EC action point: records who answered it, when, and
+    with what response, then tells the original author. Never touches the
+    job's own status — this clears the flag, nothing else. A no-op if the
+    comment isn't an open action point (already resolved, or was never
+    one) — checked before acting, so a double-click can't re-stamp the
+    resolution or re-notify the author a second time."""
+    row = query_one(
+        "SELECT 1 FROM job_comment WHERE id = %s AND is_ec_action_point = TRUE AND action_resolved = FALSE",
+        (comment_id,),
+    )
+    if not row:
+        return
+    execute(
+        "UPDATE job_comment SET action_resolved = TRUE, action_resolved_at = %s, "
+        "action_resolved_by = %s, action_resolution_note = %s WHERE id = %s",
+        (now_utc(), actor_id, note, comment_id),
+    )
+    _notify_action_resolved(comment_id, actor_id, note)
+
+
+def _notify_action_resolved(comment_id: int, actor_id: int, note: str) -> None:
+    row = query_one(
+        """
+        SELECT c.author_id, c.job_id AS job_pk, j.job_id AS job_code, s.name AS resolver_name
+        FROM job_comment c
+        JOIN job j ON j.id = c.job_id
+        JOIN staff s ON s.id = %s
+        WHERE c.id = %s
+        """,
+        (actor_id, comment_id),
+    )
+    if not row or row["author_id"] == actor_id:
+        return
+    message = f"{row['resolver_name']} resolved your EC action point on {row['job_code']}: {note}"
+    create_notification(row["author_id"], "ec_action_resolved", "job", row["job_pk"], message)
+
+
 def list_job_comments(job_id: int) -> list:
     return query(
         """
-        SELECT c.*, s.name AS author_name
+        SELECT c.*, s.name AS author_name, r.name AS resolved_by_name
         FROM job_comment c
         JOIN staff s ON s.id = c.author_id
+        LEFT JOIN staff r ON r.id = c.action_resolved_by
         WHERE c.job_id = %s
         ORDER BY c.created_at DESC
         """,
         (job_id,),
     )
+
+
+def list_open_ec_action_points() -> list:
+    """Every unresolved EC action point, oldest first — the escalated queue
+    pinned to the top of Overview for EC/Super Admin/Ops Coordinator, and
+    the same set the performance dashboard's "waiting on EC" metric counts
+    (see count_open_ec_action_points)."""
+    return query(
+        """
+        SELECT c.id, c.job_id AS job_pk, c.body, c.action_opened_at,
+               s.name AS author_name, j.job_id AS job_code, j.title AS job_title,
+               cl.name AS client_name
+        FROM job_comment c
+        JOIN staff s ON s.id = c.author_id
+        JOIN job j ON j.id = c.job_id
+        LEFT JOIN client cl ON cl.id = j.client_id
+        WHERE c.is_ec_action_point = TRUE AND c.action_resolved = FALSE AND j.hidden = FALSE
+        ORDER BY c.action_opened_at ASC
+        """
+    )
+
+
+def count_open_ec_action_points() -> int:
+    """The "waiting on EC" count a performance dashboard tile reads —
+    same predicate as list_open_ec_action_points, just the count."""
+    row = query_one(
+        """
+        SELECT COUNT(*) AS n FROM job_comment c JOIN job j ON j.id = c.job_id
+        WHERE c.is_ec_action_point = TRUE AND c.action_resolved = FALSE AND j.hidden = FALSE
+        """
+    )
+    return row["n"]
 
 
 def list_recent_specialist_comments(limit: int = 15) -> list:
@@ -1532,6 +1612,7 @@ def list_recent_specialist_comments(limit: int = 15) -> list:
     return query(
         """
         SELECT c.id, c.job_id AS job_pk, c.body, c.created_at,
+               c.is_ec_action_point, c.action_opened_at, c.action_resolved,
                s.name AS author_name, j.job_id AS job_code, j.title AS job_title,
                cl.name AS client_name
         FROM job_comment c

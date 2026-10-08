@@ -288,6 +288,11 @@ CREATE INDEX IF NOT EXISTS idx_job_costing_line_job_id ON job_costing_line(job_i
 -- ---------------------------------------------------------------------------
 -- JOB COMMENT — a lightweight comment thread on a job. Anyone with access to
 -- the job can post; kept simple on purpose (no edits, no threading).
+--
+-- A comment can also be an EC action point: a general update ticked
+-- "Needs EC action / decision" instead of just being left as a note. The
+-- action_* columns stay NULL/false for every ordinary comment — they only
+-- ever populate on a comment raised as one.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS job_comment (
     id              SERIAL PRIMARY KEY,
@@ -297,7 +302,16 @@ CREATE TABLE IF NOT EXISTS job_comment (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS is_ec_action_point BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS action_opened_at TIMESTAMPTZ;
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS action_resolved BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS action_resolved_at TIMESTAMPTZ;
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS action_resolved_by INTEGER REFERENCES staff(id);
+ALTER TABLE job_comment ADD COLUMN IF NOT EXISTS action_resolution_note TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_job_comment_job_id ON job_comment(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_comment_open_action
+    ON job_comment(action_opened_at) WHERE is_ec_action_point AND NOT action_resolved;
 
 -- ---------------------------------------------------------------------------
 -- INVOICE LINE — a real invoice's line items. One line per job on the
