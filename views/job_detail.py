@@ -15,6 +15,7 @@ from core import tz
 from core import ui
 from core.constants import (
     CATEGORY_LABELS,
+    EC_RESOLVER_ROLES,
     FORCE_DELETE_PIN,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
@@ -993,9 +994,6 @@ def _expenses(job: dict, user: dict) -> None:
                     st.rerun()
 
 
-_EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER)
-
-
 def _comments(job: dict, user: dict, *, locked: bool = False) -> None:
     st.markdown("#### Comments")
     if locked:
@@ -1039,7 +1037,7 @@ def _comments(job: dict, user: dict, *, locked: bool = False) -> None:
     comments = models.list_job_comments(job["id"])
     if not comments:
         st.caption("No comments yet.")
-    can_resolve = user["role"] in _EC_RESOLVER_ROLES
+    can_resolve = user["role"] in EC_RESOLVER_ROLES
     for c in comments:
         _render_comment(c, user["id"] if can_resolve else None)
 

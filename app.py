@@ -102,8 +102,17 @@ NAV = {
         ("Compliance", compliance_tracker.render),
         ("File Register", file_register.render),
     ],
+    # Overview is the same firm-wide operational view super_admin and
+    # manager get (home_principal.render — job counts, stalls, red flags,
+    # the EC action-point queue, done-unbilled as a worklist, never a
+    # revenue/financial figure) — visibility only, reusing that component
+    # as-is; it grants no action admin couldn't already take from Register,
+    # Billing or a job's own page, and home_principal.py gates its one
+    # actionable control (resolving an EC action point) to EC/super_admin/
+    # manager exactly as job_detail.py's comment thread already does.
     ROLE_ADMIN: [
         ("Home", home_admin.render),
+        ("Overview", home_principal.render),
         ("Capture", capture.render),
         ("Register", lambda u: register.render(u)),
         ("Immigration", immigration.render),

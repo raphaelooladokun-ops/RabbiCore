@@ -9,7 +9,7 @@ import streamlit as st
 from core import models
 from core import tz
 from core import ui
-from core.constants import RISK_RED, ROLE_PRINCIPAL, STATUS_LABELS_SHORT, humanize, titlecase_name
+from core.constants import EC_RESOLVER_ROLES, RISK_RED, ROLE_PRINCIPAL, STATUS_LABELS_SHORT, humanize, titlecase_name
 
 STATUS_ORDER = ["new", "in_progress", "blocked", "done", "closed"]
 STATUS_FILTER_KEY = "principal_status_filter"
@@ -19,10 +19,10 @@ def render(user: dict) -> None:
     ui.page_header(f"Good to see you, {titlecase_name(user['name']).split()[0]}", "Firm-wide oversight — every job, every client.")
     ui.risk_legend()
 
-    # Every role that lands on Overview (principal, manager, super_admin)
-    # is one of the three roles that can resolve an EC action point, so no
-    # extra role check is needed here — pinned above everything else,
-    # oldest first, exactly like the escalated queue it is.
+    # Pinned above everything else, oldest first. Everyone who lands on
+    # Overview (now including admin) sees the queue — admin's own Resolve
+    # control inside it stays gated to EC_RESOLVER_ROLES, the same set
+    # job_detail.py's comment thread already restricts it to.
     _ec_action_queue(user)
 
     summary = models.firm_summary()
@@ -89,7 +89,11 @@ def _ec_action_queue(user: dict) -> None:
     if not open_points:
         return
     st.markdown(f"#### 📌 EC action points — {len(open_points)} open")
-    st.caption("Oldest first. Resolving requires a short decision note and never changes the job's own status.")
+    can_resolve = user["role"] in EC_RESOLVER_ROLES
+    caption = "Oldest first."
+    if can_resolve:
+        caption += " Resolving requires a short decision note and never changes the job's own status."
+    st.caption(caption)
     for c in open_points:
         age = models.format_duration(c["action_opened_at"], tz.now_utc())
         with st.container(border=True):
@@ -100,14 +104,15 @@ def _ec_action_queue(user: dict) -> None:
             ):
                 ui.go_to_job(c["job_pk"])
             st.write(f"**{titlecase_name(c['author_name'])}:** {c['body']}")
-            with st.form(key=f"ecq_resolve_{c['id']}"):
-                note = st.text_input("Resolution — what's the decision? *", key=f"ecq_note_{c['id']}")
-                if st.form_submit_button("Resolve"):
-                    if not note.strip():
-                        st.error("Enter the decision or answer before resolving.")
-                    else:
-                        models.resolve_ec_action_point(c["id"], user["id"], note.strip())
-                        st.toast("Resolved.", icon="✅")
-                        st.rerun()
+            if can_resolve:
+                with st.form(key=f"ecq_resolve_{c['id']}"):
+                    note = st.text_input("Resolution — what's the decision? *", key=f"ecq_note_{c['id']}")
+                    if st.form_submit_button("Resolve"):
+                        if not note.strip():
+                            st.error("Enter the decision or answer before resolving.")
+                        else:
+                            models.resolve_ec_action_point(c["id"], user["id"], note.strip())
+                            st.toast("Resolved.", icon="✅")
+                            st.rerun()
     st.write("")
     st.divider()
