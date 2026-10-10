@@ -302,6 +302,13 @@ def _header(job: dict, user: dict) -> None:
         f'<div class="rc-job-title" style="margin-top:0.5rem;">{job["title"]}</div>',
         unsafe_allow_html=True,
     )
+    if job.get("start_override_by"):
+        overrider = models.get_staff(job["start_override_by"])
+        overrider_name = titlecase_name(overrider["name"]) if overrider else "—"
+        override_reason = (job.get("start_override_reason") or "no reason given").rstrip(".")
+        st.caption(
+            f"Invoice override by **{overrider_name}** on {tz.fmt(job['start_override_at'])} — {override_reason}."
+        )
 
 
 def _push_control(job: dict, key_prefix: str, user: dict) -> None:
@@ -627,26 +634,18 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
     if status == STATUS_NEW:
         can_start, block_reason = models.can_start_work(job)
         if can_start:
-            if job.get("start_override_by"):
-                st.caption(f"Principal override on file — {job.get('start_override_reason') or 'start allowed'}.")
+            # The override audit line (who/when/reason), if any, is shown
+            # once in the page header — visible at every status, not just
+            # while still New — rather than repeated here.
             if st.button("Start work", key=f"{key_prefix}_start"):
                 _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
         else:
             st.info(f"Can't start yet — {block_reason}")
-            # Overriding the invoice-before-work rule is exactly the kind of
-            # "override system rules" authority reserved to EC/super_admin —
-            # manager is deliberately never added here.
-            if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
-                with st.form(key=f"{key_prefix}_override_form"):
-                    st.write("Allow this job to start without an approved invoice")
-                    reason = st.text_input("Reason for the override *", key=f"{key_prefix}_override_reason")
-                    if st.form_submit_button("Allow start"):
-                        if not reason.strip():
-                            st.error("A reason is required to override the invoice gate.")
-                        else:
-                            models.set_start_override(job["id"], actor_id, reason.strip())
-                            st.toast("Override recorded — the specialist can now start work.", icon="✅")
-                            st.rerun()
+            # Overriding the invoice-before-work rule is "override system
+            # rules" authority: EC, super_admin, and admin (Ops Coordinator)
+            # have it — manager is deliberately never added here.
+            if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_ADMIN):
+                _invoice_override_control(job, key_prefix, user)
 
     elif status == STATUS_IN_PROGRESS:
         is_owning_worker = role in (ROLE_SPECIALIST, ROLE_MANAGER) and job["owner_id"] == actor_id
@@ -689,6 +688,51 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
             return
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
             _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
+
+
+def _invoice_override_control(job: dict, key_prefix: str, user: dict) -> None:
+    """EC/super_admin/admin only (checked by the caller): let a specialist
+    start this job without an approved invoice. Gated by the actor's own
+    4-digit override PIN — personal, never shared or defaulted — on top of
+    the existing required-reason step, so this stays a deliberate action
+    rather than a one-click. The very first time anyone uses this without
+    a PIN on file yet, they're walked through setting one before the
+    override form itself appears."""
+    actor_id = user["id"]
+    if not models.has_override_pin(actor_id):
+        st.info(
+            "Set your own 4-digit override PIN before you can use this — yours alone, "
+            "never shared with or copied from another account."
+        )
+        with st.form(key=f"{key_prefix}_setpin_form"):
+            pin1 = st.text_input("New 4-digit PIN *", type="password", max_chars=4, key=f"{key_prefix}_setpin1")
+            pin2 = st.text_input("Confirm PIN *", type="password", max_chars=4, key=f"{key_prefix}_setpin2")
+            if st.form_submit_button("Set PIN"):
+                if not (pin1.isdigit() and len(pin1) == 4):
+                    st.error("Enter exactly 4 digits.")
+                elif pin1 != pin2:
+                    st.error("Those two PINs don't match.")
+                elif models.pin_already_in_use(pin1, exclude_staff_id=actor_id):
+                    st.error("That PIN is already in use on another account — pick a different one.")
+                else:
+                    models.set_override_pin(actor_id, pin1)
+                    st.toast("PIN set.", icon="✅")
+                    st.rerun()
+        return
+
+    with st.form(key=f"{key_prefix}_override_form"):
+        st.write("Allow this job to start without an approved invoice")
+        reason = st.text_input("Reason for the override *", key=f"{key_prefix}_override_reason")
+        pin = st.text_input("Your 4-digit override PIN *", type="password", max_chars=4, key=f"{key_prefix}_override_pin")
+        if st.form_submit_button("Allow start"):
+            if not reason.strip():
+                st.error("A reason is required to override the invoice gate.")
+            elif not models.verify_override_pin(actor_id, pin):
+                st.error("Incorrect PIN.")
+            else:
+                models.set_start_override(job["id"], actor_id, reason.strip())
+                st.toast("Override recorded — the specialist can now start work.", icon="✅")
+                st.rerun()
 
 
 def _apply_status(job_pk: int, new_status: str, reason: str | None = None, actor_id: int | None = None) -> None:
