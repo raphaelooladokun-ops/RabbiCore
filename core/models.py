@@ -991,54 +991,15 @@ def can_start_work(job: dict) -> tuple[bool, str | None]:
 def set_start_override(job_pk: int, actor_id: int, reason: str) -> None:
     """Let a specialist start work on this job even though it hasn't been
     invoiced yet, or the invoice isn't approved yet. EC, super_admin and
-    admin (Ops Coordinator) can grant this — the role check and the
-    actor's own 4-digit override PIN are both enforced in the view layer,
-    not here. Recorded with who/when/why for audit (start_override_at is
-    UTC, as always — displayed Lagos wherever it's shown) — the specialist
-    still has to click Start work themselves; this only lifts the gate."""
+    admin (Ops Coordinator) can grant this — the role check is enforced in
+    the view layer, not here. Recorded with who/when/why for audit
+    (start_override_at is UTC, as always — displayed Lagos wherever it's
+    shown) — the specialist still has to click Start work themselves; this
+    only lifts the gate."""
     execute(
         "UPDATE job SET start_override_by = %s, start_override_at = now(), start_override_reason = %s WHERE id = %s",
         (actor_id, reason, job_pk),
     )
-
-
-# ---------------------------------------------------------------------------
-# Invoice-override PIN — per person, bcrypt-hashed like a password, never
-# shared or defaulted between accounts. Gates set_start_override() above in
-# the view layer: anyone with override authority sets their own PIN the
-# first time they use it, then re-enters it (not the shared
-# FORCE_DELETE_PIN) every time after.
-# ---------------------------------------------------------------------------
-def has_override_pin(staff_id: int) -> bool:
-    row = query_one("SELECT override_pin_hash FROM staff WHERE id = %s", (staff_id,))
-    return bool(row and row["override_pin_hash"])
-
-
-def pin_already_in_use(pin: str, exclude_staff_id: int | None = None) -> bool:
-    """True if some OTHER staff member already holds this exact PIN.
-    Hashes are salted (bcrypt), so two people's PINs can't be compared by
-    looking at the stored hashes — this checks the candidate against every
-    existing hash instead, one bcrypt verify per staff member with a PIN
-    set, which is cheap at this firm's scale and only ever runs when
-    someone is setting or changing their own PIN."""
-    rows = query("SELECT id, override_pin_hash FROM staff WHERE override_pin_hash IS NOT NULL")
-    for row in rows:
-        if row["id"] == exclude_staff_id:
-            continue
-        if bcrypt.checkpw(pin.encode(), row["override_pin_hash"].encode()):
-            return True
-    return False
-
-
-def set_override_pin(staff_id: int, pin: str) -> None:
-    execute("UPDATE staff SET override_pin_hash = %s WHERE id = %s", (hash_password(pin), staff_id))
-
-
-def verify_override_pin(staff_id: int, pin: str) -> bool:
-    row = query_one("SELECT override_pin_hash FROM staff WHERE id = %s", (staff_id,))
-    if not row or not row["override_pin_hash"]:
-        return False
-    return bcrypt.checkpw(pin.encode(), row["override_pin_hash"].encode())
 
 
 def push_job(job_pk: int, actor_id: int) -> None:

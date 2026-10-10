@@ -41,13 +41,10 @@ ALTER TABLE staff DROP CONSTRAINT IF EXISTS staff_role_check;
 ALTER TABLE staff ADD CONSTRAINT staff_role_check
     CHECK (role IN ('principal', 'admin', 'specialist', 'client', 'super_admin', 'manager', 'file_room_admin'));
 
--- Per-person PIN gating the invoice-override action (start a job without an
--- approved invoice) — bcrypt-hashed, same as password_hash, never the
--- plaintext. Deliberately NOT the shared FORCE_DELETE_PIN: each person who
--- can override (EC, super_admin, admin/Ops Coordinator) sets and keeps
--- their own, never reused or defaulted from another account. NULL until
--- that person sets one for the first time.
-ALTER TABLE staff ADD COLUMN IF NOT EXISTS override_pin_hash TEXT;
+-- The invoice-override action (start a job without an approved invoice)
+-- briefly gated on a per-person PIN here; dropped again in favour of just
+-- the required reason, already enforced in the view layer.
+ALTER TABLE staff DROP COLUMN IF EXISTS override_pin_hash;
 
 -- ---------------------------------------------------------------------------
 -- SERVICE CATALOGUE — the locked 43-service catalogue (CAC / Immigration /
