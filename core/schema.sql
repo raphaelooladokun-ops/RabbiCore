@@ -18,6 +18,13 @@ CREATE TABLE IF NOT EXISTS client (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A recurring client's annual prepaid retainer — the one figure recurring
+-- revenue has to amortise, since recurring jobs are never individually
+-- invoiced. NULL until someone enters it (the performance dashboard shows
+-- recurring revenue as $0/blank rather than guess a figure for a client
+-- with nothing recorded here).
+ALTER TABLE client ADD COLUMN IF NOT EXISTS annual_retainer_amount NUMERIC(12, 2);
+
 -- ---------------------------------------------------------------------------
 -- STAFF — every human who logs in
 -- ---------------------------------------------------------------------------

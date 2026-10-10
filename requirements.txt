@@ -4,3 +4,4 @@ bcrypt>=4.1
 pandas>=2.2
 fpdf2>=2.7
 tzdata>=2024.1
+altair>=5.0

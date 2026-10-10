@@ -44,6 +44,8 @@ def render(user: dict, client_pk: int) -> None:
 
     _edit_name_control(client, user)
     st.divider()
+    _retainer_control(client, user)
+    st.divider()
     _contacts_section(client, user)
     st.divider()
     _jobs_for_client(client)
@@ -80,6 +82,29 @@ def _edit_name_control(client: dict, user: dict) -> None:
                     f"{e['old_value']} → {e['new_value']} — {titlecase_name(e['changed_by_name']) or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
+
+
+def _retainer_control(client: dict, user: dict) -> None:
+    current = client.get("annual_retainer_amount")
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        if current:
+            st.caption(f"Annual retainer: ₦{float(current):,.2f}")
+        return
+    label = f"Annual retainer — ₦{float(current):,.2f}" if current else "Annual retainer — not set"
+    with st.expander(label):
+        st.caption(
+            "What this client pays annually for recurring (prepaid) services — recurring jobs are "
+            "never individually invoiced, so this is the only figure the performance dashboard's "
+            "recurring-revenue line has to work with. Leave at 0 if this client has no retainer."
+        )
+        amount = st.number_input(
+            "Annual retainer (₦)", min_value=0.0, step=1000.0,
+            value=float(current) if current else 0.0, key=f"retainer_{client['id']}",
+        )
+        if st.button("Save retainer", key=f"saveretainer_{client['id']}", type="primary"):
+            models.set_client_annual_retainer(client["id"], amount if amount > 0 else None)
+            st.toast("Retainer updated.", icon="✅")
+            st.rerun()
 
 
 _CAN_EDIT_CONTACTS = (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)

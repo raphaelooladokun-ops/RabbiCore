@@ -1402,6 +1402,14 @@ def update_client_name(client_pk: int, new_name: str, actor_id: int | None = Non
     _log_field_edit("client", client_pk, "name", client["name"], new_name, actor_id)
 
 
+def set_client_annual_retainer(client_pk: int, amount: float | None) -> None:
+    """EC/admin/manager/super_admin: record what this client pays annually
+    for their recurring (prepaid) services — the one figure the performance
+    dashboard needs to amortise recurring revenue across 12 months, since a
+    recurring job itself is never invoiced. None clears it back to unset."""
+    execute("UPDATE client SET annual_retainer_amount = %s WHERE id = %s", (amount, client_pk))
+
+
 def list_field_edits(entity_type: str, entity_id: int) -> list:
     return query(
         "SELECT l.*, s.name AS changed_by_name FROM field_edit_log l "
