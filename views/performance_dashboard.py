@@ -324,11 +324,11 @@ def _leakage_table(df: pd.DataFrame) -> None:
     s_token = st.query_params.get("s", "")
     show = df.copy()
     show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}#{r['job_code']}", axis=1)
-    show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if n else "—")
+    show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["What"] = show["title"]
     show["Pillar"] = show["pillar"].map(lambda c: CATEGORY_LABELS.get(c, c))
     show["Status"] = show["status"].map(lambda s: STATUS_LABELS_SHORT.get(s, s))
-    show["Owner"] = show["owner_name"].map(lambda n: titlecase_name(n) if n else "—")
+    show["Owner"] = show["owner_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["Completed"] = show["completed_at"].map(tz.to_lagos)
     show["Est. value (₦)"] = show["est_value"]
 
@@ -472,10 +472,10 @@ def _stalled_table(df: pd.DataFrame) -> None:
     show = df.copy()
     show["Badge"] = show["age_days"].map(lambda a: _age_badge(a, 7, 14))
     show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}#{r['job_code']}", axis=1)
-    show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if n else "—")
+    show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["What"] = show["title"]
     show["Status"] = show["status"].map(lambda s: STATUS_LABELS_SHORT.get(s, s))
-    show["Owner"] = show["owner_name"].map(lambda n: titlecase_name(n) if n else "—")
+    show["Owner"] = show["owner_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["Age (days)"] = show["age_days"]
     st.dataframe(
         show[["Badge", "Job", "Client", "What", "Status", "Owner", "Age (days)"]],

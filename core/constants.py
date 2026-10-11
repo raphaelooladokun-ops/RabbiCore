@@ -212,8 +212,10 @@ def titlecase_name(value: str | None) -> str:
     'ALTIUS CHEM LIMITED' -> 'Altius Chem Limited', but 'RGPL' stays
     'RGPL'. Case is judged per word, so an acronym embedded in a longer
     name (e.g. 'RGPL Nigeria Limited') is preserved in place."""
+    if not isinstance(value, str):
+        return ""
     if not value:
-        return value or ""
+        return value
     tokens = re.split(r"(\s+)", value)
     out = []
     for token in tokens:
