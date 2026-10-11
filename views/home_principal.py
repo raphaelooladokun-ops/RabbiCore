@@ -20,9 +20,9 @@ def render(user: dict) -> None:
     ui.risk_legend()
 
     # Pinned above everything else, oldest first. Everyone who lands on
-    # Overview (now including admin) sees the queue — admin's own Resolve
-    # control inside it stays gated to EC_RESOLVER_ROLES, the same set
-    # job_detail.py's comment thread already restricts it to.
+    # Overview sees the queue; the Resolve control inside it is gated to
+    # EC_RESOLVER_ROLES, the same set job_detail.py's comment thread
+    # already restricts it to.
     _ec_action_queue(user)
 
     summary = models.firm_summary()

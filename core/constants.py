@@ -44,11 +44,8 @@ ROLE_LABELS = {
 
 # Who can resolve an EC action point on a comment — shared by job_detail.py's
 # own comment thread and home_principal.py's pinned Overview queue, so the
-# two can never drift apart. Raising one is open to any non-principal role;
-# resolving stays this narrower set. Admin is deliberately not in it: admin
-# can see the queue (Overview is shared visibility, not shared authority)
-# but gets no Resolve control there, same as on a job's own comment thread.
-EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER)
+# two can never drift apart. Raising one is open to any non-principal role.
+EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER, ROLE_ADMIN)
 
 # Extra confirmation step on super-admin force-delete (bypassing the normal
 # "refuses if history is attached" guard on users/jobs) — a speed bump
