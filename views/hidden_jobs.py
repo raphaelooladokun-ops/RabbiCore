@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import models
 from core import ui
-from core.constants import CATEGORY_LABELS, STATUS_LABELS_SHORT, humanize, titlecase_name
+from core.constants import CATEGORY_LABELS, FORCE_DELETE_PIN, STATUS_LABELS_SHORT, humanize, titlecase_name
 
 _ROW_WIDTHS = [1.1, 1.6, 2.2, 1.2, 1.1, 1.6, 1.1, 1.3]
 _HEADERS = ["Job ID", "Client", "What", "Category", "Status", "Hidden", "", ""]
@@ -52,6 +52,26 @@ def render(user: dict) -> None:
                     st.error(str(e))
                 else:
                     st.toast(f"{j['job_id']} permanently deleted.", icon="✅")
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**Force delete (bypass invoice check)**")
+            st.caption(
+                "Only needed when the delete above refuses because this job is on an invoice — the "
+                "invoice line is removed but the invoice itself survives. Requires the 4-digit PIN."
+            )
+            force_confirm = st.checkbox(
+                "I understand this cannot be undone", key=f"forceconfirm_{j['id']}",
+            )
+            force_pin = st.text_input(
+                "4-digit PIN", type="password", max_chars=4, key=f"forcepin_{j['id']}",
+            )
+            if st.button("Force delete", key=f"forcedel_{j['id']}", disabled=not force_confirm, type="primary"):
+                if force_pin != FORCE_DELETE_PIN:
+                    st.error("Incorrect PIN.")
+                else:
+                    models.delete_job(j["id"], force=True)
+                    st.toast(f"{j['job_id']} force-deleted.", icon="✅")
                     st.rerun()
 
     st.caption(f"{len(jobs)} hidden job(s)")
