@@ -78,7 +78,7 @@ def revenue_by_month(date_from: date, date_to: date, pillar: str | None, owner_i
         JOIN invoice i ON i.id = il.invoice_id
         JOIN job j ON j.id = il.job_id
         {_SC_JOIN}
-        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND {_PROJECT_ONLY}
+        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND j.hidden = FALSE AND {_PROJECT_ONLY}
     """
     params: list = [list(_REVENUE_STATUSES), date_from, date_to]
     if pillar:
@@ -122,7 +122,7 @@ def revenue_by_pillar(date_from: date, date_to: date, owner_id: int | None) -> p
         JOIN invoice i ON i.id = il.invoice_id
         JOIN job j ON j.id = il.job_id
         {_SC_JOIN}
-        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND {_PROJECT_ONLY}
+        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND j.hidden = FALSE AND {_PROJECT_ONLY}
     """
     params: list = [list(_REVENUE_STATUSES), date_from, date_to]
     if owner_id:
@@ -143,7 +143,7 @@ def top_clients(date_from: date, date_to: date, pillar: str | None, owner_id: in
         JOIN client c ON c.id = i.client_id
         JOIN job j ON j.id = il.job_id
         {_SC_JOIN}
-        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND {_PROJECT_ONLY}
+        WHERE i.status = ANY(%s) AND i.invoice_date BETWEEN %s AND %s AND j.hidden = FALSE AND {_PROJECT_ONLY}
     """
     params: list = [list(_REVENUE_STATUSES), date_from, date_to]
     if pillar:
@@ -218,7 +218,7 @@ def receivables_detail(pillar: str | None, owner_id: int | None) -> pd.DataFrame
         JOIN invoice_line il ON il.invoice_id = i.id
         JOIN job j ON j.id = il.job_id
         {_SC_JOIN}
-        WHERE i.status = 'approved' AND {_PROJECT_ONLY}
+        WHERE i.status = 'approved' AND j.hidden = FALSE AND {_PROJECT_ONLY}
     """
     params: list = []
     if pillar:

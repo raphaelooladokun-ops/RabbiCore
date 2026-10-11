@@ -57,8 +57,9 @@ def render(user: dict) -> None:
             st.divider()
             st.markdown("**Force delete (bypass invoice check)**")
             st.caption(
-                "Only needed when the delete above refuses because this job is on an invoice — the "
-                "invoice line is removed but the invoice itself survives. Requires the 4-digit PIN."
+                "Only needed when the delete above refuses because this job is on an invoice. If the "
+                "invoice was only for this job, it's deleted too; if it also bills other jobs, just "
+                "this job's line is removed and the invoice survives. Requires the 4-digit PIN."
             )
             force_confirm = st.checkbox(
                 "I understand this cannot be undone", key=f"forceconfirm_{j['id']}",

@@ -824,8 +824,12 @@ def delete_job(job_pk: int, force: bool = False) -> None:
     automatically.
 
     `force=True` is the PIN-gated escape hatch (super admin only, checked
-    in the view layer): it removes the job's own invoice_line rows instead
-    of refusing — the invoice record itself survives with fewer lines.
+    in the view layer): it removes the job's own invoice_line rows, then
+    deletes any invoice that's left with no lines at all — an invoice that
+    existed only for this job shouldn't survive it. An invoice that also
+    bills other jobs keeps those lines and survives with just this one
+    removed, since deleting it would silently erase billing history for
+    jobs that still exist.
 
     Any other job depending on this one (blocked_by) is resolved first —
     same as when a blocker is marked done, not just a dangling reference
@@ -833,12 +837,16 @@ def delete_job(job_pk: int, force: bool = False) -> None:
     'blocked' would never self-heal (the resync sweep only considers jobs
     that still have a blocker to check)."""
     on_invoice = query_one("SELECT 1 FROM invoice_line WHERE job_id = %s", (job_pk,))
+    invoice_ids: list = []
     if on_invoice:
         if not force:
             raise JobDeleteError(
                 "This job is on an invoice and can't be permanently deleted — hide it instead, "
                 "or remove it from the invoice first."
             )
+        invoice_ids = [r["invoice_id"] for r in query(
+            "SELECT DISTINCT invoice_id FROM invoice_line WHERE job_id = %s", (job_pk,)
+        )]
         execute("DELETE FROM invoice_line WHERE job_id = %s", (job_pk,))
     dependents = query("SELECT id, owner_id, status, title, job_id FROM job WHERE blocked_by = %s", (job_pk,))
     for dep in dependents:
@@ -855,6 +863,9 @@ def delete_job(job_pk: int, force: bool = False) -> None:
         else:
             execute("UPDATE job SET blocked_by = NULL WHERE id = %s", (dep["id"],))
     execute("DELETE FROM job WHERE id = %s", (job_pk,))
+    for invoice_id in invoice_ids:
+        if not query_one("SELECT 1 FROM invoice_line WHERE invoice_id = %s", (invoice_id,)):
+            execute("DELETE FROM invoice WHERE id = %s", (invoice_id,))
 
 
 # ---------------------------------------------------------------------------
