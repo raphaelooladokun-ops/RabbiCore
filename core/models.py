@@ -1630,7 +1630,10 @@ def list_recent_specialist_comments(limit: int = 15) -> list:
     """Most recent comments left by specialists, across every job — the raw
     feed a home page's "Updates" panel surfaces, cleaner than digging
     through the notification bell or each job's own comment thread one by
-    one."""
+    one. A resolved EC action point drops out of this feed the same way it
+    drops out of the pinned queue above it — once it's handled, it's off
+    Overview, not lingering with a "resolved" badge. An ordinary comment,
+    or one still open, keeps showing."""
     return query(
         """
         SELECT c.id, c.job_id AS job_pk, c.body, c.created_at,
@@ -1642,6 +1645,7 @@ def list_recent_specialist_comments(limit: int = 15) -> list:
         JOIN job j ON j.id = c.job_id
         LEFT JOIN client cl ON cl.id = j.client_id
         WHERE s.role = %s AND j.hidden = FALSE
+          AND NOT (c.is_ec_action_point = TRUE AND c.action_resolved = TRUE)
         ORDER BY c.created_at DESC
         LIMIT %s
         """,

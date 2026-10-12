@@ -265,14 +265,15 @@ def updates_feed(limit: int = 15) -> None:
     if not updates:
         st.caption("No specialist comments yet.")
     for c in updates:
-        box = st.container(border=True) if (c["is_ec_action_point"] and not c["action_resolved"]) else st.container()
+        # A resolved EC action point never reaches this loop — filtered out
+        # at the query (list_recent_specialist_comments), same as the
+        # pinned queue above. So is_ec_action_point here always means open.
+        box = st.container(border=True) if c["is_ec_action_point"] else st.container()
         with box:
             col1, col2 = st.columns([5, 1])
             with col1:
-                if c["is_ec_action_point"] and not c["action_resolved"]:
+                if c["is_ec_action_point"]:
                     st.markdown('<span class="rc-badge rc-badge-amber">📌 EC action — open</span>', unsafe_allow_html=True)
-                elif c["is_ec_action_point"]:
-                    st.markdown('<span class="rc-badge rc-badge-grey">📌 EC action — resolved</span>', unsafe_allow_html=True)
                 st.markdown(
                     f"**{titlecase_name(c['author_name'])}** on **{short_job_id(c['job_code'])}** — "
                     f"{titlecase_name(c['client_name']) or '—'}: {c['job_title']}  \n"
