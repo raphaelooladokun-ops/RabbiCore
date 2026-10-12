@@ -9,7 +9,15 @@ import streamlit as st
 from core import models
 from core import tz
 from core import ui
-from core.constants import EC_RESOLVER_ROLES, RISK_RED, ROLE_PRINCIPAL, STATUS_LABELS_SHORT, humanize, titlecase_name
+from core.constants import (
+    EC_RESOLVER_ROLES,
+    INVOICE_APPROVER_ROLES,
+    RISK_RED,
+    ROLE_PRINCIPAL,
+    STATUS_LABELS_SHORT,
+    humanize,
+    titlecase_name,
+)
 
 STATUS_ORDER = ["new", "in_progress", "blocked", "done", "closed"]
 STATUS_FILTER_KEY = "principal_status_filter"
@@ -24,6 +32,12 @@ def render(user: dict) -> None:
     # EC_RESOLVER_ROLES, the same set job_detail.py's comment thread
     # already restricts it to.
     _ec_action_queue(user)
+
+    # Same pinned treatment for an invoice sitting in pending_approval —
+    # only shown to whoever can actually approve one (EC/super_admin), so
+    # it's never only discoverable by scrolling Billing's full invoice list.
+    if user["role"] in INVOICE_APPROVER_ROLES:
+        _pending_invoice_queue()
 
     summary = models.firm_summary()
     jobs = models.list_jobs(exclude_dismissed=True)
@@ -114,5 +128,30 @@ def _ec_action_queue(user: dict) -> None:
                             models.resolve_ec_action_point(c["id"], user["id"], note.strip())
                             st.toast("Resolved.", icon="✅")
                             st.rerun()
+    st.write("")
+    st.divider()
+
+
+def _pending_invoice_queue() -> None:
+    """Every invoice sitting in pending_approval, oldest first — same
+    pinned treatment as the EC action queue above. Approving/rejecting
+    itself stays on the invoice's own document (line items need a real
+    look), so this is a pointer to it, not a shortcut around it."""
+    pending = models.list_pending_invoices()
+    if not pending:
+        return
+    st.markdown(f"#### 🧾 Invoices awaiting approval — {len(pending)} pending")
+    st.caption("Oldest first. Open one to review the line items and approve or reject it.")
+    for inv in pending:
+        age = models.format_duration(inv["created_at"], tz.now_utc())
+        total = models.invoice_total(inv["id"])
+        with st.container(border=True):
+            st.markdown(f'<span class="rc-badge rc-badge-amber">waiting {age}</span>', unsafe_allow_html=True)
+            if st.button(
+                f"{inv['invoice_code']} — {titlecase_name(inv['client_name'])} · ₦{total:,.2f}",
+                key=f"pendinv_open_{inv['id']}", type="tertiary",
+            ):
+                ui.go_to_invoice(inv["id"])
+            st.caption(f"Submitted by {titlecase_name(inv['created_by_name']) or '—'}")
     st.write("")
     st.divider()

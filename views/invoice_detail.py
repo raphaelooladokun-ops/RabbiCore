@@ -15,6 +15,7 @@ from core import models
 from core import pdf as pdf_module
 from core import ui
 from core.constants import (
+    INVOICE_APPROVER_ROLES,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
     ROLE_MANAGER,
@@ -55,7 +56,7 @@ def render(user: dict, invoice_pk: int) -> None:
         st.warning(f"**Rejected by {titlecase_name(invoice['rejected_by_name']) or '—'}:** {invoice['rejection_reason']}")
 
     editable_by_principal = (
-        user["role"] in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN) and invoice["status"] == "pending_approval"
+        user["role"] in INVOICE_APPROVER_ROLES and invoice["status"] == "pending_approval"
     )
 
     if editable_by_principal:
@@ -123,7 +124,7 @@ def _remove_approval_control(invoice: dict, user: dict) -> None:
     that record too — loudly warned here and gated behind an explicit
     confirmation, never a single click, since this is a records-integrity
     action."""
-    if user["role"] not in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+    if user["role"] not in INVOICE_APPROVER_ROLES:
         return
 
     history = models.list_invoice_unapprovals(invoice["id"])

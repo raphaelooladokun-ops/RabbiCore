@@ -1221,6 +1221,9 @@ def get_invoice(invoice_id: int):
 
 
 def list_invoices(client_id: int | None = None, status: str | None = None) -> list:
+    """Pending-approval invoices sort first (newest first within that group),
+    then everything else, newest first — so Billing's "All invoices" list
+    doesn't bury what actually needs a decision under settled history."""
     sql = _INVOICE_SELECT + " WHERE 1=1"
     params: list = []
     if client_id:
@@ -1229,8 +1232,16 @@ def list_invoices(client_id: int | None = None, status: str | None = None) -> li
     if status:
         sql += " AND i.status = %s"
         params.append(status)
-    sql += " ORDER BY i.created_at DESC"
+    sql += " ORDER BY (i.status = 'pending_approval') DESC, i.created_at DESC"
     return query(sql, tuple(params))
+
+
+def list_pending_invoices() -> list:
+    """Every invoice awaiting approval, oldest first — the same shape as
+    list_open_ec_action_points, pinned to Overview for whoever can approve
+    (EC/super_admin) so a submitted invoice is never only discoverable by
+    scrolling Billing."""
+    return query(_INVOICE_SELECT + " WHERE i.status = 'pending_approval' ORDER BY i.created_at ASC")
 
 
 def list_invoice_lines(invoice_id: int) -> list:

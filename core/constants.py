@@ -47,6 +47,13 @@ ROLE_LABELS = {
 # two can never drift apart. Raising one is open to any non-principal role.
 EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER, ROLE_ADMIN)
 
+# Who can give an invoice its final approval or reject it — shared by
+# invoice_detail.py's own gate and home_principal.py's pinned Overview
+# queue, so the two can never drift apart. Manager can create/revise/send/
+# mark-paid an invoice but not approve it; that final call stays EC/
+# super_admin only.
+INVOICE_APPROVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
+
 # Extra confirmation step on super-admin force-delete (bypassing the normal
 # "refuses if history is attached" guard on users/jobs) — a speed bump
 # against an accidental click on an irreversible action, not real access
