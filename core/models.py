@@ -1290,6 +1290,18 @@ def delete_all_invoices() -> int:
     return total
 
 
+def delete_invoice(invoice_id: int) -> None:
+    """Super-admin-only, PIN-gated: permanently delete a single invoice —
+    distinct from Reject (which sends it back to admin for revision and
+    keeps the record). Every job on this invoice is detached (invoice_id
+    set to NULL); a 'closed' job reverts to 'done' first since the status
+    guard trigger forbids a closed job with no invoice. invoice_line and
+    invoice_unapproval_log rows cascade with it automatically."""
+    execute("UPDATE job SET status = 'done' WHERE invoice_id = %s AND status = 'closed'", (invoice_id,))
+    execute("UPDATE job SET invoice_id = NULL WHERE invoice_id = %s", (invoice_id,))
+    execute("DELETE FROM invoice WHERE id = %s", (invoice_id,))
+
+
 def close_job(job_pk: int) -> None:
     """Mark a job closed. Requires an approved (or paid) invoice — enforced by the DB."""
     set_status(job_pk, STATUS_CLOSED)

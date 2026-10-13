@@ -15,6 +15,7 @@ from core import models
 from core import pdf as pdf_module
 from core import ui
 from core.constants import (
+    FORCE_DELETE_PIN,
     INVOICE_APPROVER_ROLES,
     INVOICE_STATUS_LABELS,
     ROLE_ADMIN,
@@ -68,6 +69,7 @@ def render(user: dict, invoice_pk: int) -> None:
     _remove_approval_control(invoice, user)
     _vat_control(invoice, user)
     _edit_invoice_code_control(invoice, user)
+    _delete_invoice_control(invoice, user)
 
 
 def _lifecycle_actions(user: dict, invoice: dict, lines: list, total: float) -> None:
@@ -227,6 +229,36 @@ def _edit_invoice_code_control(invoice: dict, user: dict) -> None:
                     f"{e['old_code']} → {e['new_code']} — {titlecase_name(e['changed_by_name']) or '—'}, "
                     f"{e['changed_at'].strftime('%d %b %Y, %H:%M')}"
                 )
+
+
+def _delete_invoice_control(invoice: dict, user: dict) -> None:
+    """Super-admin only, PIN-gated: permanently delete this invoice —
+    distinct from Reject, which sends it back to admin for revision and
+    keeps the record. This removes it outright, for a duplicate, a test,
+    or one that should never have existed. Every job on it is detached
+    (freed up to be invoiced again) rather than left pointing at nothing."""
+    if user["role"] != ROLE_SUPER_ADMIN:
+        return
+    st.write("")
+    with st.expander("⚠️ Delete this invoice permanently (super admin)"):
+        st.caption(
+            "Different from Reject: this removes the invoice outright rather than sending it back to "
+            "admin for revision. Every job on it is detached and free to be invoiced again. This "
+            "cannot be undone. Requires the 4-digit PIN."
+        )
+        confirm = st.checkbox(
+            f"Yes, permanently delete {invoice['invoice_code']} — I understand this cannot be undone.",
+            key="inv_delete_confirm",
+        )
+        pin = st.text_input("4-digit PIN", type="password", max_chars=4, key="inv_delete_pin")
+        if st.button("Delete invoice permanently", key="inv_delete_btn", disabled=not confirm, type="primary"):
+            if pin != FORCE_DELETE_PIN:
+                st.error("Incorrect PIN.")
+            else:
+                models.delete_invoice(invoice["id"])
+                st.toast(f"{invoice['invoice_code']} permanently deleted.", icon="✅")
+                ui.clear_all_nav()
+                st.rerun()
 
 
 def _document_header(invoice: dict, total: float) -> None:
