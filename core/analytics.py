@@ -17,7 +17,14 @@ on its own, entirely separately, from each client's annual_retainer_amount
 
 "Revenue" everywhere here means invoice_line amounts on an invoice that has
 actually been approved or paid — a pending_approval invoice isn't yet a
-validated billing, and a rejected one was sent back, so neither counts."""
+validated billing, and a rejected one was sent back, so neither counts.
+
+Some invoices were entered with 7.5% VAT baked into the line amount and
+some weren't, which used to distort revenue and receivables here. Every
+query that sums an invoice_line amount backs VAT out wherever
+invoice.vat_inclusive is set — see _NET_AMOUNT — so these figures are
+always the net (VAT-exclusive) amount, regardless of how the invoice was
+originally entered."""
 
 from __future__ import annotations
 
@@ -37,6 +44,12 @@ _REVENUE_STATUSES = ("approved", "paid")
 # from `job j`.
 _SC_JOIN = "LEFT JOIN service_catalogue sc ON sc.code = j.service_type"
 _PROJECT_ONLY = "sc.recurring_frequency IS NULL AND j.client_id IS NOT NULL"
+
+# VAT is 7.5%. An invoice_line's amount is only ever backed down to net,
+# never grossed up — a VAT-exclusive amount (the default) passes through
+# unchanged. Requires `invoice i` already joined as `i`.
+_VAT_RATE = 1.075
+_NET_AMOUNT = f"(CASE WHEN i.vat_inclusive THEN il.amount / {_VAT_RATE} ELSE il.amount END)"
 
 
 def shifted_range(date_from: date, date_to: date) -> tuple[date, date]:
@@ -73,7 +86,7 @@ def revenue_by_month(date_from: date, date_to: date, pillar: str | None, owner_i
     never a lump sum from a recurring job's own invoice, because a
     recurring job never has one."""
     sql = f"""
-        SELECT date_trunc('month', i.invoice_date)::date AS month, SUM(il.amount) AS revenue
+        SELECT date_trunc('month', i.invoice_date)::date AS month, SUM({_NET_AMOUNT}) AS revenue
         FROM invoice_line il
         JOIN invoice i ON i.id = il.invoice_id
         JOIN job j ON j.id = il.job_id
@@ -117,7 +130,7 @@ def recurring_revenue_monthly() -> dict:
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def revenue_by_pillar(date_from: date, date_to: date, owner_id: int | None) -> pd.DataFrame:
     sql = f"""
-        SELECT j.category AS pillar, SUM(il.amount) AS revenue
+        SELECT j.category AS pillar, SUM({_NET_AMOUNT}) AS revenue
         FROM invoice_line il
         JOIN invoice i ON i.id = il.invoice_id
         JOIN job j ON j.id = il.job_id
@@ -137,7 +150,7 @@ def revenue_by_pillar(date_from: date, date_to: date, owner_id: int | None) -> p
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def top_clients(date_from: date, date_to: date, pillar: str | None, owner_id: int | None, limit: int = 10) -> pd.DataFrame:
     sql = f"""
-        SELECT c.name AS client, SUM(il.amount) AS revenue
+        SELECT c.name AS client, SUM({_NET_AMOUNT}) AS revenue
         FROM invoice_line il
         JOIN invoice i ON i.id = il.invoice_id
         JOIN client c ON c.id = i.client_id
@@ -212,7 +225,7 @@ def receivables_detail(pillar: str | None, owner_id: int | None) -> pd.DataFrame
     that actually match the filter, not the whole invoice."""
     sql = f"""
         SELECT i.id AS invoice_id, i.invoice_code, c.name AS client_name, i.invoice_date,
-               il.amount, (CURRENT_DATE - i.invoice_date) AS age_days
+               {_NET_AMOUNT} AS amount, (CURRENT_DATE - i.invoice_date) AS age_days
         FROM invoice i
         JOIN client c ON c.id = i.client_id
         JOIN invoice_line il ON il.invoice_id = i.id

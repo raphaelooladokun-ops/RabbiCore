@@ -1043,14 +1043,18 @@ _INVOICE_SELECT = """
 """
 
 
-def create_invoice(client_id: int, invoice_date: date, created_by: int, lines: list) -> dict:
+def create_invoice(
+    client_id: int, invoice_date: date, created_by: int, lines: list, vat_inclusive: bool = False,
+) -> dict:
     """Admin-only: build and submit a new invoice for the principal's
     approval. `lines` is a list of {job_id, description, amount}. The
-    invoice code is auto-generated (INV-{year}-{id:04d}) — never typed."""
+    invoice code is auto-generated (INV-{year}-{id:04d}) — never typed.
+    vat_inclusive flags whether the line amounts already have 7.5% VAT
+    baked in, so Performance can back it out later — see schema comment."""
     row = execute_returning(
-        "INSERT INTO invoice (invoice_code, client_id, status, created_by, invoice_date) "
-        "VALUES (%s, %s, 'pending_approval', %s, %s) RETURNING id",
-        (_temp_code("INV"), client_id, created_by, invoice_date),
+        "INSERT INTO invoice (invoice_code, client_id, status, created_by, invoice_date, vat_inclusive) "
+        "VALUES (%s, %s, 'pending_approval', %s, %s, %s) RETURNING id",
+        (_temp_code("INV"), client_id, created_by, invoice_date, vat_inclusive),
     )
     invoice_id = row["id"]
     invoice_code = f"INV-{date.today().year}-{invoice_id:04d}"
@@ -1071,7 +1075,7 @@ def create_invoice(client_id: int, invoice_date: date, created_by: int, lines: l
     return result
 
 
-def revise_invoice(invoice_id: int, invoice_date: date, lines: list) -> dict:
+def revise_invoice(invoice_id: int, invoice_date: date, lines: list, vat_inclusive: bool = False) -> dict:
     """Admin-only: rework a rejected invoice's jobs/line items/date and
     resubmit it. This is the only path that can change which jobs are on an
     invoice once it's been created. The invoice code is kept as-is — a
@@ -1091,9 +1095,9 @@ def revise_invoice(invoice_id: int, invoice_date: date, lines: list) -> dict:
         execute("UPDATE job SET invoice_id = %s WHERE id = %s", (invoice_id, line["job_id"]))
 
     execute(
-        "UPDATE invoice SET invoice_date = %s, status = 'pending_approval', "
+        "UPDATE invoice SET invoice_date = %s, vat_inclusive = %s, status = 'pending_approval', "
         "rejection_reason = NULL, rejected_by = NULL, rejected_at = NULL WHERE id = %s",
-        (invoice_date, invoice_id),
+        (invoice_date, vat_inclusive, invoice_id),
     )
 
     result = get_invoice(invoice_id)
@@ -1337,6 +1341,14 @@ def update_invoice_code(invoice_pk: int, new_code: str, actor_id: int | None = N
         raise CodeEditError(f"Invoice code '{new_code}' is already in use.")
     execute("UPDATE invoice SET invoice_code = %s WHERE id = %s", (new_code, invoice_pk))
     _log_code_edit("invoice", invoice_pk, invoice["invoice_code"], new_code, actor_id)
+
+
+def set_invoice_vat_inclusive(invoice_pk: int, vat_inclusive: bool) -> None:
+    """Admin/manager/EC/super_admin: correct whether this invoice's line
+    amounts already have 7.5% VAT baked in — editable even on an approved
+    invoice, since it corrects how Performance reads an existing figure,
+    not the figure itself. See schema comment on invoice.vat_inclusive."""
+    execute("UPDATE invoice SET vat_inclusive = %s WHERE id = %s", (vat_inclusive, invoice_pk))
 
 
 def list_code_edits(entity_type: str, entity_id: int) -> list:

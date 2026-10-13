@@ -118,6 +118,18 @@ ALTER TABLE invoice ADD COLUMN IF NOT EXISTS sent_by INTEGER REFERENCES staff(id
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS payment_reference TEXT;
 ALTER TABLE invoice ADD COLUMN IF NOT EXISTS payment_date DATE;
 
+-- Whether this invoice's line amounts already have 7.5% VAT baked in.
+-- Some invoices were entered VAT-inclusive and some weren't, which
+-- distorted revenue/receivables on the performance dashboard — this flag
+-- lets Performance back VAT out (amount / 1.075) wherever it's ticked, and
+-- take the amount as-is wherever it isn't. FALSE (the default) means the
+-- recorded amount is already VAT-exclusive. Never changes what the
+-- invoice itself displays or charges the client — only how Performance
+-- interprets the amount already on it. Editable even on an approved
+-- invoice, since it's correcting how an existing figure is read, not the
+-- figure itself.
+ALTER TABLE invoice ADD COLUMN IF NOT EXISTS vat_inclusive BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Migration for installs created before the admin-creates / principal-approves
 -- flow: map the old draft/issued statuses onto the new ones, and widen to
 -- allow 'rejected' (principal sends an invoice back to admin with a reason

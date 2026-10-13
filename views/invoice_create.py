@@ -112,6 +112,13 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
     invoice_date = st.date_input(
         "Invoice date", value=invoice["invoice_date"] if revising else date.today(), key="inv_date",
     )
+    vat_inclusive = st.checkbox(
+        "Line amounts above already include VAT (7.5%)",
+        value=bool(invoice.get("vat_inclusive")) if revising else False,
+        key="inv_vat_inclusive",
+        help="Leave unchecked if the amounts are VAT-exclusive. Only affects how the performance "
+        "dashboard reads this invoice's revenue — never what's shown or charged on the invoice itself.",
+    )
 
     st.write("")
     label = "Resubmit for approval" if revising else "Submit for approval"
@@ -123,8 +130,8 @@ def _builder(user: dict, client: dict, preselect_job_id: int | None = None, invo
             st.error("Every line item needs an amount greater than zero.")
             return
         if revising:
-            result = models.revise_invoice(invoice["id"], invoice_date, line_inputs)
+            result = models.revise_invoice(invoice["id"], invoice_date, line_inputs, vat_inclusive)
         else:
-            result = models.create_invoice(client["id"], invoice_date, user["id"], line_inputs)
+            result = models.create_invoice(client["id"], invoice_date, user["id"], line_inputs, vat_inclusive)
         st.toast(f"{result['invoice_code']} submitted for approval.", icon="✅")
         ui.go_to_invoice(result["id"])

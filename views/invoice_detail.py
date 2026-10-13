@@ -66,6 +66,7 @@ def render(user: dict, invoice_pk: int) -> None:
 
     _lifecycle_actions(user, invoice, lines, total)
     _remove_approval_control(invoice, user)
+    _vat_control(invoice, user)
     _edit_invoice_code_control(invoice, user)
 
 
@@ -172,6 +173,32 @@ def _remove_approval_control(invoice: dict, user: dict) -> None:
                 )
 
 
+def _vat_control(invoice: dict, user: dict) -> None:
+    """EC (principal)/admin/manager/super_admin: mark whether this
+    invoice's line amounts already have 7.5% VAT baked in. Editable even
+    on an approved invoice — some were entered VAT-inclusive and some
+    weren't, which distorted the performance dashboard's revenue figures,
+    and correcting the flag doesn't change anything the invoice itself
+    shows or charges the client, only how Performance reads it."""
+    if user["role"] not in (ROLE_ADMIN, ROLE_MANAGER, ROLE_PRINCIPAL, ROLE_SUPER_ADMIN):
+        return
+    st.write("")
+    current = bool(invoice.get("vat_inclusive"))
+    label = "Edit VAT status — includes VAT" if current else "Edit VAT status — excludes VAT"
+    with st.expander(label):
+        st.caption(
+            "Only affects how the performance dashboard reads this invoice's revenue — never what's "
+            "shown or charged on the invoice itself."
+        )
+        new_value = st.checkbox(
+            "Line amounts already include VAT (7.5%)", value=current, key=f"inv_vat_{invoice['id']}",
+        )
+        if st.button("Save VAT status", key="inv_savevat"):
+            models.set_invoice_vat_inclusive(invoice["id"], new_value)
+            st.toast("VAT status updated.", icon="✅")
+            st.rerun()
+
+
 def _edit_invoice_code_control(invoice: dict, user: dict) -> None:
     """EC (principal)/admin/manager/super_admin: correct or manually set
     this invoice's number. invoice_code is normally auto-generated and
@@ -223,6 +250,8 @@ def _document_header(invoice: dict, total: float) -> None:
             st.write(f"Submitted by: {titlecase_name(invoice['created_by_name']) or '—'}")
             if invoice["approved_by_name"]:
                 st.write(f"Approved by: {titlecase_name(invoice['approved_by_name'])}")
+            if invoice.get("vat_inclusive"):
+                st.caption("Includes 7.5% VAT")
         st.markdown(f"### Total: ₦{total:,.2f}")
     st.write("")
 

@@ -12,7 +12,7 @@ retainer amount, not from any job."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import altair as alt
 import pandas as pd
@@ -66,21 +66,78 @@ def render(user: dict) -> None:
     )
 
     date_from, date_to, pillar, owner_id = _filters_row()
+    filter_suffix = _filter_href_suffix(date_from, date_to, pillar, owner_id)
     _kpi_row(date_from, date_to, pillar, owner_id)
 
     tab_money, tab_jobs, tab_people = st.tabs(["Money", "Jobs", "People"])
     with tab_money:
-        _money_tab(date_from, date_to, pillar, owner_id)
+        _money_tab(date_from, date_to, pillar, owner_id, filter_suffix)
     with tab_jobs:
-        _jobs_tab(date_from, date_to, pillar, owner_id)
+        _jobs_tab(date_from, date_to, pillar, owner_id, filter_suffix)
     with tab_people:
         _people_tab(date_from, date_to, pillar)
 
 
 # ---------------------------------------------------------------------------
 # Filters
+#
+# This page's job/invoice table links are raw <a href> (st.column_config.
+# LinkColumn — a dataframe cell can't be a real Streamlit button), so
+# clicking one is an actual browser navigation, not a rerun: it tears down
+# and rebuilds session_state from scratch, unlike every other page's
+# button-based job navigation. Without help, that reset the date/pillar/
+# owner filters (and even dropped back to the first nav page) every time
+# someone opened a job from one of these tables and came back. The fix
+# mirrors core.ui's own nav-in-the-URL scheme, scoped to this page's own
+# filters: restore each widget's default from the URL once per browser
+# tab, keep the URL in sync as filters change, and carry the same filter
+# query string on every job/invoice link so the round trip preserves it.
 # ---------------------------------------------------------------------------
+def _restore_filter_defaults() -> None:
+    if "perf_daterange" not in st.session_state:
+        raw_from, raw_to = st.query_params.get("pdf"), st.query_params.get("pdt")
+        if raw_from and raw_to:
+            try:
+                st.session_state["perf_daterange"] = (date.fromisoformat(raw_from), date.fromisoformat(raw_to))
+            except ValueError:
+                pass
+    if "perf_pillar" not in st.session_state:
+        raw_pillar = st.query_params.get("ppl")
+        if raw_pillar in _PILLAR_ORDER:
+            st.session_state["perf_pillar"] = raw_pillar
+    if "perf_owner" not in st.session_state:
+        raw_owner = st.query_params.get("pow")
+        if raw_owner and raw_owner.isdigit():
+            st.session_state["perf_owner"] = int(raw_owner)
+
+
+def _sync_filter_query_params(date_from, date_to, pillar: str | None, owner_id: int | None) -> None:
+    st.query_params["pdf"] = date_from.isoformat()
+    st.query_params["pdt"] = date_to.isoformat()
+    if pillar:
+        st.query_params["ppl"] = pillar
+    else:
+        st.query_params.pop("ppl", None)
+    if owner_id:
+        st.query_params["pow"] = str(owner_id)
+    else:
+        st.query_params.pop("pow", None)
+
+
+def _filter_href_suffix(date_from, date_to, pillar: str | None, owner_id: int | None) -> str:
+    """Today's filters as a URL query fragment — appended to every job/
+    invoice link in this page's tables, alongside p=Performance, so a
+    click-through and a Back lands here with the same filters applied."""
+    parts = ["p=Performance", f"pdf={date_from.isoformat()}", f"pdt={date_to.isoformat()}"]
+    if pillar:
+        parts.append(f"ppl={pillar}")
+    if owner_id:
+        parts.append(f"pow={owner_id}")
+    return "&" + "&".join(parts)
+
+
 def _filters_row() -> tuple:
+    _restore_filter_defaults()
     today = tz.today_lagos()
     default_from = today - timedelta(days=365)
 
@@ -113,6 +170,7 @@ def _filters_row() -> tuple:
 
     pillar = None if pillar_choice == "All" else pillar_choice
     owner_id = None if owner_choice == "All" else owner_choice
+    _sync_filter_query_params(date_from, date_to, pillar, owner_id)
     return date_from, date_to, pillar, owner_id
 
 
@@ -184,7 +242,7 @@ def _kpi_row(date_from, date_to, pillar, owner_id) -> None:
 # ---------------------------------------------------------------------------
 # MONEY tab
 # ---------------------------------------------------------------------------
-def _money_tab(date_from, date_to, pillar, owner_id) -> None:
+def _money_tab(date_from, date_to, pillar, owner_id, filter_suffix: str) -> None:
     st.markdown("#### Revenue trend")
     rev_df = analytics.revenue_by_month(date_from, date_to, pillar, owner_id)
     recurring = analytics.recurring_revenue_monthly()
@@ -228,12 +286,12 @@ def _money_tab(date_from, date_to, pillar, owner_id) -> None:
 
     st.markdown("#### Leakage — done/closed, never invoiced")
     leaked = analytics.leakage_jobs(date_from, date_to, pillar, owner_id)
-    _leakage_table(leaked)
+    _leakage_table(leaked, filter_suffix)
 
     st.markdown("#### Receivables aging")
     receivables = analytics.receivables_detail(pillar, owner_id)
     aging = analytics.receivables_aging_summary(receivables)
-    _receivables_tables(aging, receivables)
+    _receivables_tables(aging, receivables, filter_suffix)
 
 
 def _build_revenue_trend(rev_df: pd.DataFrame, recurring_monthly: float, date_from, date_to) -> pd.DataFrame:
@@ -317,13 +375,13 @@ def _age_badge(days: float, good_max: float, warn_max: float) -> str:
     return "🔴"
 
 
-def _leakage_table(df: pd.DataFrame) -> None:
+def _leakage_table(df: pd.DataFrame, filter_suffix: str) -> None:
     if df.empty:
         st.caption("No leakage in this period — every done/closed project job on file has an invoice.")
         return
     s_token = st.query_params.get("s", "")
     show = df.copy()
-    show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}#{r['job_code']}", axis=1)
+    show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}{filter_suffix}#{r['job_code']}", axis=1)
     show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["What"] = show["title"]
     show["Pillar"] = show["pillar"].map(lambda c: CATEGORY_LABELS.get(c, c))
@@ -350,7 +408,7 @@ def _leakage_table(df: pd.DataFrame) -> None:
     )
 
 
-def _receivables_tables(aging: pd.DataFrame, detail: pd.DataFrame) -> None:
+def _receivables_tables(aging: pd.DataFrame, detail: pd.DataFrame, filter_suffix: str) -> None:
     if detail.empty:
         st.caption("Nothing outstanding — no approved, unpaid invoices.")
         return
@@ -377,7 +435,9 @@ def _receivables_tables(aging: pd.DataFrame, detail: pd.DataFrame) -> None:
         s_token = st.query_params.get("s", "")
         d = detail.sort_values("age_days", ascending=False).copy()
         d["Client"] = d["client_name"].map(titlecase_name)
-        d["Invoice"] = d.apply(lambda r: f"?s={s_token}&i={int(r['invoice_id'])}#{r['invoice_code']}", axis=1)
+        d["Invoice"] = d.apply(
+            lambda r: f"?s={s_token}&i={int(r['invoice_id'])}{filter_suffix}#{r['invoice_code']}", axis=1
+        )
         d["Invoice date"] = d["invoice_date"]
         d["Age (days)"] = d["age_days"]
         d["Badge"] = d["age_days"].map(lambda a: _age_badge(a, 30, 60))
@@ -396,7 +456,7 @@ def _receivables_tables(aging: pd.DataFrame, detail: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # JOBS tab
 # ---------------------------------------------------------------------------
-def _jobs_tab(date_from, date_to, pillar, owner_id) -> None:
+def _jobs_tab(date_from, date_to, pillar, owner_id, filter_suffix: str) -> None:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### Open jobs by status")
@@ -415,10 +475,10 @@ def _jobs_tab(date_from, date_to, pillar, owner_id) -> None:
 
     st.markdown("#### Stalled jobs — no activity in 3+ days")
     stalled = analytics.stalled_jobs(pillar, owner_id)
-    _stalled_table(stalled)
+    _stalled_table(stalled, filter_suffix)
 
     st.markdown("#### Waiting on EC")
-    _waiting_ec_table()
+    _waiting_ec_table(filter_suffix)
 
 
 def _status_bar_chart(status_df: pd.DataFrame) -> alt.Chart:
@@ -464,14 +524,14 @@ def _cycle_time_chart(trend_df: pd.DataFrame) -> alt.Chart:
     )
 
 
-def _stalled_table(df: pd.DataFrame) -> None:
+def _stalled_table(df: pd.DataFrame, filter_suffix: str) -> None:
     if df.empty:
         st.caption("Nothing stalled — every open project job has moved in the last 3 days.")
         return
     s_token = st.query_params.get("s", "")
     show = df.copy()
     show["Badge"] = show["age_days"].map(lambda a: _age_badge(a, 7, 14))
-    show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}#{r['job_code']}", axis=1)
+    show["Job"] = show.apply(lambda r: f"?s={s_token}&j={int(r['id'])}{filter_suffix}#{r['job_code']}", axis=1)
     show["Client"] = show["client_name"].map(lambda n: titlecase_name(n) if pd.notna(n) else "—")
     show["What"] = show["title"]
     show["Status"] = show["status"].map(lambda s: STATUS_LABELS_SHORT.get(s, s))
@@ -487,7 +547,7 @@ def _stalled_table(df: pd.DataFrame) -> None:
     )
 
 
-def _waiting_ec_table() -> None:
+def _waiting_ec_table(filter_suffix: str) -> None:
     points = models.list_open_ec_action_points()
     if not points:
         st.caption("Nothing waiting on EC right now.")
@@ -500,7 +560,7 @@ def _waiting_ec_table() -> None:
         rows.append(
             {
                 "Badge": _age_badge(age_days, 2, 5),
-                "Job": f"?s={s_token}&j={p['job_pk']}#{p['job_code']}",
+                "Job": f"?s={s_token}&j={p['job_pk']}{filter_suffix}#{p['job_code']}",
                 "Client": titlecase_name(p.get("client_name")) or "—",
                 "Raised by": titlecase_name(p["author_name"]),
                 "Ask": p["body"],
