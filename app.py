@@ -41,6 +41,7 @@ from views import (
     invoice_detail,
     job_detail,
     login,
+    notifications,
     performance_dashboard,
     register,
     services_admin,
@@ -222,6 +223,7 @@ def main() -> None:
         or st.session_state.get(ui.NAV_INVOICE_KEY)
         or st.session_state.get(ui.NAV_CREATE_INVOICE_KEY)
         or st.session_state.get(ui.NAV_CLIENT_KEY)
+        or st.session_state.get(ui.NAV_NOTIFICATIONS_KEY)
     )
 
     # Real buttons, not a radio: a click always reruns even when the page is
@@ -235,6 +237,7 @@ def main() -> None:
         ):
             st.session_state["_current_page"] = name
             ui.clear_all_nav()
+            ui.clear_notifications_nav()
             st.rerun()
 
     st.sidebar.write("")
@@ -262,6 +265,10 @@ def main() -> None:
     nav_client_pk = st.session_state.get(ui.NAV_CLIENT_KEY)
     if nav_client_pk:
         client_detail.render(user, nav_client_pk)
+        return
+
+    if st.session_state.get(ui.NAV_NOTIFICATIONS_KEY):
+        notifications.render(user)
         return
 
     render_fn = dict(pages)[choice]

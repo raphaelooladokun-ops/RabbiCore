@@ -28,6 +28,7 @@ NAV_JOB_KEY = "nav_job_pk"
 NAV_INVOICE_KEY = "nav_invoice_pk"
 NAV_CREATE_INVOICE_KEY = "nav_create_invoice"
 NAV_CLIENT_KEY = "nav_client_pk"
+NAV_NOTIFICATIONS_KEY = "nav_notifications"
 
 CSS_PATH = Path(__file__).parent.parent / "assets" / "style.css"
 
@@ -140,6 +141,14 @@ def go_to_client(client_pk: int) -> None:
     st.rerun()
 
 
+def go_to_notifications() -> None:
+    """Navigate to the full Notifications page — reached from the bell's
+    "See all" button, same click-through pattern as a job/invoice/client."""
+    clear_all_nav()
+    st.session_state[NAV_NOTIFICATIONS_KEY] = True
+    st.rerun()
+
+
 def clear_job_nav() -> None:
     st.session_state[NAV_JOB_KEY] = None
 
@@ -149,7 +158,18 @@ def clear_invoice_nav() -> None:
     st.session_state[NAV_CREATE_INVOICE_KEY] = False
 
 
+def clear_notifications_nav() -> None:
+    st.session_state[NAV_NOTIFICATIONS_KEY] = False
+
+
 def clear_all_nav() -> None:
+    """Clears every detail-view overlay (job/invoice/client/create-invoice)
+    — deliberately NOT the Notifications overlay. A notification's "Linked
+    item" link is a genuine browser reload (LinkColumn, same as Follow-ups'
+    own job links), so the only way "← Back" on the job/invoice it opens
+    can return to Notifications rather than the user's ordinary home page
+    is for that flag to survive this reset; see clear_notifications_nav for
+    the one place (a sidebar nav click) that should actually leave it."""
     st.session_state[NAV_JOB_KEY] = None
     st.session_state[NAV_INVOICE_KEY] = None
     st.session_state[NAV_CREATE_INVOICE_KEY] = False
@@ -162,7 +182,7 @@ def clear_all_nav() -> None:
     st.session_state["_nav_epoch"] = st.session_state.get("_nav_epoch", 0) + 1
 
 
-_NAV_QUERY_KEYS = ("p", "j", "i", "ci", "c")
+_NAV_QUERY_KEYS = ("p", "j", "i", "ci", "c", "n")
 
 
 def sync_nav_query_params() -> None:
@@ -176,6 +196,7 @@ def sync_nav_query_params() -> None:
         "i": st.session_state.get(NAV_INVOICE_KEY),
         "ci": "1" if st.session_state.get(NAV_CREATE_INVOICE_KEY) else None,
         "c": st.session_state.get(NAV_CLIENT_KEY),
+        "n": "1" if st.session_state.get(NAV_NOTIFICATIONS_KEY) else None,
     }
     for key in _NAV_QUERY_KEYS:
         value = current[key]
@@ -207,6 +228,9 @@ def restore_nav_from_query_params(page_names: list) -> None:
 
     if st.query_params.get("ci") == "1":
         st.session_state[NAV_CREATE_INVOICE_KEY] = True
+
+    if st.query_params.get("n") == "1":
+        st.session_state[NAV_NOTIFICATIONS_KEY] = True
 
 
 def back_button(label: str = "← Back") -> None:
@@ -319,6 +343,8 @@ def notification_bell(user: dict) -> None:
             if st.button("Mark all read", key="notif_markall", use_container_width=True):
                 models.mark_all_notifications_read(user["id"])
                 st.rerun()
+        if st.button("See all →", key="notif_see_all", type="tertiary", use_container_width=True):
+            go_to_notifications()
 
 
 def sidebar_wordmark() -> None:

@@ -2426,6 +2426,25 @@ def list_notifications(staff_id: int, limit: int = 20) -> list:
     )
 
 
+def list_all_notifications(staff_id: int) -> list:
+    """Every notification for this user, newest first — the Notifications
+    page's own feed, unlike list_notifications (the bell popover, capped at
+    20). Resolves the linked job's or invoice's human code for the page's
+    link column; NULL when that job/invoice has since been deleted."""
+    return query(
+        """
+        SELECT n.id, n.kind, n.link_type, n.link_id, n.message, n.read, n.created_at,
+               j.job_id AS job_code, iv.invoice_code
+        FROM notification n
+        LEFT JOIN job j ON n.link_type = 'job' AND j.id = n.link_id
+        LEFT JOIN invoice iv ON n.link_type = 'invoice' AND iv.id = n.link_id
+        WHERE n.staff_id = %s
+        ORDER BY n.created_at DESC
+        """,
+        (staff_id,),
+    )
+
+
 def count_unread_notifications(staff_id: int) -> int:
     row = query_one("SELECT count(*) AS n FROM notification WHERE staff_id = %s AND NOT read", (staff_id,))
     return row["n"] if row else 0
