@@ -689,6 +689,27 @@ def _status_actions(job: dict, key_prefix: str, user: dict) -> None:
         if st.button("Resume — in progress", key=f"{key_prefix}_resume"):
             _apply_status(job["id"], STATUS_IN_PROGRESS, actor_id=actor_id)
 
+    elif status == STATUS_DONE:
+        # Undoing a done call is "override system rules" authority, same
+        # roles as the invoice-start override above — not the owning
+        # specialist, since marking done was their call to begin with.
+        if role in (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_ADMIN):
+            if job["invoice_id"]:
+                st.caption(
+                    f"Invoice **{job['invoice_code']}** is already attached to this job — "
+                    "reopening won't remove or change it."
+                )
+            with st.form(key=f"{key_prefix}_reopen_form"):
+                st.write("Reopen — wrongly marked done")
+                reason = st.text_area("Why is this being reopened? *", key=f"{key_prefix}_reopen_reason")
+                if st.form_submit_button("Reopen job"):
+                    if not reason.strip():
+                        st.error("A reason is required to reopen a job.")
+                    else:
+                        _apply_status(job["id"], STATUS_IN_PROGRESS, reason.strip(), actor_id)
+        else:
+            st.caption("Only the principal, admin or super admin can reopen a job marked done.")
+
 
 def _invoice_override_control(job: dict, key_prefix: str, user: dict) -> None:
     """EC/super_admin/admin only (checked by the caller): let a specialist
