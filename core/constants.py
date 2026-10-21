@@ -54,6 +54,16 @@ EC_RESOLVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN, ROLE_MANAGER, ROLE_ADMIN)
 # super_admin only.
 INVOICE_APPROVER_ROLES = (ROLE_PRINCIPAL, ROLE_SUPER_ADMIN)
 
+# Who can run a BULK invoice action from Billing's invoice list — narrower
+# than who can do the equivalent action one at a time, by design. Manager
+# keeps its existing single mark-paid/mark-sent (invoice_detail.py) exactly
+# as-is; it just isn't offered a bulk shortcut. Bulk Approve is super-admin
+# only, even though principal (EC) can approve one at a time: a bulk approve
+# skips the per-invoice line review EC's own approval flow includes, so it's
+# deliberately not opened up to them — EC's approval stays single-invoice.
+BULK_INVOICE_APPROVE_ROLES = (ROLE_SUPER_ADMIN,)
+BULK_INVOICE_PAID_SENT_ROLES = (ROLE_ADMIN, ROLE_SUPER_ADMIN)
+
 # Extra confirmation step on super-admin force-delete (bypassing the normal
 # "refuses if history is attached" guard on users/jobs) — a speed bump
 # against an accidental click on an irreversible action, not real access

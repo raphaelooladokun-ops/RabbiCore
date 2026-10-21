@@ -1173,6 +1173,85 @@ def mark_invoice_paid(invoice_id: int, payment_reference: str, payment_date: dat
     )
 
 
+def bulk_approve_invoices(invoice_ids: list, approved_by: int) -> tuple[list, list]:
+    """Bulk version of approve_invoice — same eligibility rule (status must
+    be 'pending_approval'), applied per invoice rather than assumed for the
+    whole batch; anything else is skipped, never failed. Unlike the
+    single-invoice approval flow (_principal_review in invoice_detail.py),
+    this never edits line items — it approves each invoice exactly as it
+    stands, which is why it's offered to a narrower set of roles (see
+    BULK_INVOICE_APPROVE_ROLES) than single-invoice approval is. Returns
+    (applied, skipped) — each a list of the invoice's own full row, so the
+    caller can report both what happened and why anything didn't."""
+    applied, skipped = [], []
+    for inv_id in invoice_ids:
+        inv = get_invoice(inv_id)
+        if not inv:
+            continue
+        if inv["status"] != "pending_approval":
+            skipped.append(inv)
+            continue
+        approve_invoice(inv_id, approved_by)
+        applied.append(inv)
+    return applied, skipped
+
+
+def bulk_mark_invoices_sent(invoice_ids: list, sent_by: int) -> tuple[list, list]:
+    """Bulk version of mark_invoice_sent — same eligibility rule (approved
+    or paid, and not already sent). Returns (applied, skipped) as
+    bulk_approve_invoices does."""
+    applied, skipped = [], []
+    for inv_id in invoice_ids:
+        inv = get_invoice(inv_id)
+        if not inv:
+            continue
+        if inv["status"] not in ("approved", "paid") or inv.get("sent_at"):
+            skipped.append(inv)
+            continue
+        mark_invoice_sent(inv_id, sent_by)
+        applied.append(inv)
+    return applied, skipped
+
+
+def bulk_mark_invoices_paid(invoice_ids: list, payment_reference: str, payment_date: date) -> tuple[list, list]:
+    """Bulk version of mark_invoice_paid — one payment reference/date for
+    the whole batch (a single bank transfer or payment run covering several
+    invoices at once), same eligibility rule per invoice (must currently be
+    'approved') and the same required-fields check as the single action.
+    Returns (applied, skipped) as bulk_approve_invoices does."""
+    if not payment_reference or not payment_reference.strip():
+        raise InvoicePaymentError("A payment reference is required to mark an invoice paid.")
+    if not payment_date:
+        raise InvoicePaymentError("A payment date is required to mark an invoice paid.")
+    applied, skipped = [], []
+    for inv_id in invoice_ids:
+        inv = get_invoice(inv_id)
+        if not inv:
+            continue
+        if inv["status"] != "approved":
+            skipped.append(inv)
+            continue
+        mark_invoice_paid(inv_id, payment_reference, payment_date)
+        applied.append(inv)
+    return applied, skipped
+
+
+def invoice_totals(invoice_ids: list) -> dict:
+    """Each invoice's total in one query — what the Billing bulk-select
+    list and its confirmation summary ("Approve 12 invoices totalling
+    ₦X?") use instead of calling invoice_total() once per invoice. An
+    invoice with no lines yet has no row in the result, not a zero one —
+    callers read it with .get(id, 0.0)."""
+    if not invoice_ids:
+        return {}
+    rows = query(
+        "SELECT invoice_id, COALESCE(SUM(amount), 0) AS total FROM invoice_line "
+        "WHERE invoice_id = ANY(%s) GROUP BY invoice_id",
+        (list(invoice_ids),),
+    )
+    return {r["invoice_id"]: float(r["total"]) for r in rows}
+
+
 class InvoiceApprovalError(Exception):
     pass
 
