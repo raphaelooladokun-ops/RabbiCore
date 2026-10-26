@@ -5,12 +5,17 @@ Job ID opens its job detail page, which is the only place a job is updated."""
 
 from __future__ import annotations
 
+from datetime import date
+
+import pandas as pd
 import streamlit as st
 
 from core import models
+from core import tz
 from core import ui
 from core.constants import (
     CATEGORY_LABELS,
+    INVOICE_STATUS_LABELS,
     RISK_AMBER,
     RISK_EMOJI,
     RISK_GREEN,
@@ -20,6 +25,7 @@ from core.constants import (
     ROLE_ADMIN,
     ROLE_MANAGER,
     ROLE_SUPER_ADMIN,
+    SOURCE_LABELS,
     STATUS_CLOSED,
     STATUS_DISMISSED,
     STATUS_DONE,
@@ -60,6 +66,10 @@ def render(
     _triage_section(jobs, key_prefix)
     st.divider()
     _filters_and_table(jobs, only_own, key_prefix, user)
+
+    if user["role"] == ROLE_SUPER_ADMIN and not only_own and not category:
+        st.divider()
+        _export_register_control(jobs)
 
 
 def _triage_section(jobs: list, key_prefix: str) -> None:
@@ -230,3 +240,53 @@ def _bulk_actions_table(jobs: list, key_prefix: str, user: dict) -> None:
             _clear_selection()
             st.toast(f"Hid {len(selected_ids)} job(s).", icon="✅")
             st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Export register — super_admin only, the full unfiltered register (see the
+# not only_own/not category guard at the call site). "As at [date]" means
+# every job logged on or before that date, shown with its CURRENT status —
+# the app doesn't keep a day-by-day history of status changes, only the
+# latest status_changed_at, so this is a logged-by-date cutoff rather than a
+# true historical reconstruction of what each job's status was back then.
+# ---------------------------------------------------------------------------
+def _export_register_control(jobs: list) -> None:
+    with st.expander("⬇️ Export register as at a date (super admin)"):
+        st.caption(
+            "Every job logged on or before the chosen date, with its current status — not a historical "
+            "replay of what status it had back then, since the app doesn't track that day by day."
+        )
+        cutoff = st.date_input("As at", value=tz.today_lagos(), key="reg_export_cutoff")
+        matching = [j for j in jobs if tz.to_lagos_date(j["created_at"]) <= cutoff]
+
+        if not matching:
+            st.caption("No jobs logged on or before this date.")
+            return
+
+        st.write(f"**{len(matching)} job(s)** logged on or before {cutoff.strftime('%d %b %Y')}.")
+        csv_bytes = _build_register_csv(matching, cutoff)
+        st.download_button(
+            "Download CSV", data=csv_bytes, file_name=f"register_as_at_{cutoff.isoformat()}.csv",
+            mime="text/csv", type="primary", key="reg_export_download",
+        )
+
+
+def _build_register_csv(jobs: list, cutoff: date) -> bytes:
+    snapshot = tz.fmt(tz.now_utc())
+    out = pd.DataFrame(index=range(len(jobs)))
+    out["Job ID"] = [j["job_id"] for j in jobs]
+    out["Logged date"] = [tz.to_lagos_date(j["created_at"]).isoformat() for j in jobs]
+    out["Client"] = [titlecase_name(j.get("client_name")) or "" for j in jobs]
+    out["Category"] = [humanize(j["category"], CATEGORY_LABELS) for j in jobs]
+    out["Service"] = [j.get("service_name") or "" for j in jobs]
+    out["What"] = [j["title"] for j in jobs]
+    out["Owner"] = [titlecase_name(j.get("owner_name")) or "" for j in jobs]
+    out["Status"] = [humanize(j["status"]) for j in jobs]
+    out["SLA date"] = [j["sla_date"].isoformat() if j.get("sla_date") else "" for j in jobs]
+    out["Source"] = [humanize(j["source"], SOURCE_LABELS) for j in jobs]
+    out["Invoice code"] = [j.get("invoice_code") or "" for j in jobs]
+    out["Invoice status"] = [humanize(j["invoice_status"], INVOICE_STATUS_LABELS) if j.get("invoice_status") else "" for j in jobs]
+    out["Waiting on client"] = [j.get("waiting_on_client") or "" for j in jobs]
+    out["As at"] = cutoff.isoformat()
+    out["Snapshot generated at"] = snapshot
+    return out.to_csv(index=False).encode("utf-8")
