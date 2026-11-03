@@ -184,6 +184,8 @@ def _render_recurring_parent(job: dict, user: dict) -> None:
     _recurring_parent_info(job)
     st.divider()
     _recurring_checklist(job, user)
+    if user["role"] in editable_roles:
+        _add_client_control(job, user)
     st.divider()
     _comments(job, user, locked=False)
 
@@ -266,6 +268,35 @@ def _recurring_checklist(job: dict, user: dict) -> None:
             cols[2].caption(f"Completed by {titlecase_name(r.get('completed_by_name')) or '—'}")
         else:
             cols[2].write("—")
+
+
+def _add_client_control(job: dict, user: dict) -> None:
+    """Ops-coordinator: add a client to this period's checklist directly —
+    a client onboarded mid-period, or one missed when it rolled over.
+    Only clients not already on the list are offered; adding one can turn
+    an already-"Done" checklist back to in_progress (see
+    add_recurring_job_client), which is the point, not a glitch."""
+    on_list = {r["client_id"] for r in models.list_recurring_job_clients(job["id"])}
+    clients = [c for c in models.list_clients(active_only=True) if c["id"] not in on_list]
+    if not clients:
+        return
+
+    st.write("")
+    client_map = {titlecase_name(c["name"]): c for c in clients}
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        choice = st.selectbox(
+            "Add a client to this checklist", options=list(client_map.keys()), index=None,
+            placeholder="Select client…", key=f"jdr_{job['id']}_addclient",
+        )
+    with c2:
+        st.write("")
+        if st.button(
+            "Add", key=f"jdr_{job['id']}_addclient_btn", disabled=not choice, use_container_width=True,
+        ):
+            models.add_recurring_job_client(job["id"], client_map[choice]["id"], actor_id=user["id"])
+            st.toast(f"Added {choice} to this checklist.", icon="✅")
+            st.rerun()
 
 
 def _apply_recurring_tick(job: dict, client_id: int, completed: bool, actor_id: int) -> None:

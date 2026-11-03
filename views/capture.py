@@ -21,17 +21,22 @@ from core.seed_data import PILLAR_TO_CATEGORY
 
 MODE_JOB = "Log a job"
 MODE_DISMISS = "Dismiss — not a job"
+MODE_CLUBBED = "Clubbed monthly job"
 NEW_CLIENT_OPTION = "+ Add new client…"
 
 
 def render(user: dict) -> None:
     ui.page_header("Capture", "Nothing is worked until it's logged here. Keep it fast.")
 
-    mode = st.radio("", [MODE_JOB, MODE_DISMISS], horizontal=True, label_visibility="collapsed")
+    mode = st.radio(
+        "", [MODE_JOB, MODE_CLUBBED, MODE_DISMISS], horizontal=True, label_visibility="collapsed",
+    )
     st.write("")
 
     if mode == MODE_JOB:
         _job_form(user)
+    elif mode == MODE_CLUBBED:
+        _clubbed_job_form(user)
     else:
         _dismiss_form(user)
 
@@ -236,6 +241,82 @@ def _job_form(user: dict) -> None:
         st.success(f"Logged — **{job['job_id']}**, owner {owner_name}.")
         st.code(f"Logged, {job['job_id']}, owner {owner_name}", language=None)
         st.caption("Copy the line above back into the thread as confirmation.")
+
+
+def _clubbed_job_form(user: dict) -> None:
+    """Hand-create a clubbed (recurring checklist) job — a single job
+    covering every client due a recurring obligation for one period,
+    instead of logging each client's job separately. Picking a service +
+    period that already has a job just adds the chosen clients onto it
+    (models.create_recurring_parent_job is idempotent), so this doubles as
+    the "add these clients to this month's run" path when a parent
+    already exists — no need to know whether one does before using it."""
+    clients = models.list_clients(active_only=True)
+    recurring_services = [s for s in models.list_service_catalogue() if s["recurring_frequency"]]
+    if not recurring_services:
+        st.caption("No recurring services are set up yet — add one under Services first.")
+        return
+    staff = [s for s in models.list_staff(active_only=True) if s["role"] != "client"]
+
+    service_map = {s["name"]: s for s in recurring_services}
+    client_map = {c["name"]: c for c in clients}
+
+    col1, col2 = st.columns(2)
+    with col1:
+        service_name = st.selectbox(
+            "Recurring service *", options=list(service_map.keys()), index=None,
+            placeholder="Select service…", key="cap_clubbed_service",
+        )
+    with col2:
+        due_date = st.date_input(
+            "Due date, this period *", value=None, key="cap_clubbed_due",
+            help="Any day in the right month (or year, for an annual service) — everyone due that "
+            "same period lands on the same shared job automatically.",
+        )
+
+    client_names = st.multiselect(
+        "Clients on this checklist *", options=list(client_map.keys()),
+        format_func=titlecase_name, key="cap_clubbed_clients",
+    )
+
+    ordered_staff = staff
+    default_owner_index = None
+    if service_name:
+        category_for_owner = PILLAR_TO_CATEGORY[service_map[service_name]["pillar"]]
+        assigned_ids = {a["staff_id"] for a in models.list_module_specialists(category_for_owner)}
+        if assigned_ids:
+            preferred = [s for s in staff if s["id"] in assigned_ids]
+            rest = [s for s in staff if s["id"] not in assigned_ids]
+            ordered_staff = preferred + rest
+            default_owner_index = 0
+    staff_map = {ui.staff_label(s): s for s in ordered_staff}
+
+    col3, col4 = st.columns(2)
+    with col3:
+        owner_name = st.selectbox(
+            "Owner *", options=list(staff_map.keys()), index=default_owner_index,
+            placeholder="Who owns this checklist?", key="cap_clubbed_owner",
+        )
+    with col4:
+        source = _source_radio("cap_clubbed_source")
+
+    st.write("")
+    if st.button("Create clubbed job", type="primary", key="cap_clubbed_submit"):
+        if not service_name or not due_date or not client_names or not owner_name:
+            st.error("Service, due date, at least one client, and owner are required.")
+            return
+
+        service = service_map[service_name]
+        owner = staff_map[owner_name]
+        category = PILLAR_TO_CATEGORY[service["pillar"]]
+        client_ids = [client_map[n]["id"] for n in client_names]
+
+        job = models.create_recurring_parent_job(
+            service["code"], category, due_date, source, user["id"], client_ids, owner["id"],
+        )
+        st.success(
+            f"Clubbed job ready — **{job['job_id']}**, {len(client_names)} client(s), owner {owner_name}."
+        )
 
 
 def _dismiss_form(user: dict) -> None:

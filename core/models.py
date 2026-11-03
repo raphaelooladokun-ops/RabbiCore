@@ -2031,13 +2031,23 @@ def _recurring_parent_title(service_name: str, period_anchor: date, frequency: s
 
 def _get_or_create_recurring_parent(
     service_type: str, category: str, period_anchor: date, source: str, created_by: int, client_ids: list,
+    owner_id: int | None = None,
 ) -> dict:
     """Finds the open checklist job for (service, period) or creates one,
     then ensures every client in client_ids has a row on it — idempotent,
     so a client already on the list is left untouched. The one and only
     place a recurring parent job is created, so every caller (an old-style
     single-client job rolling forward, or a parent job itself completing)
-    converges on the same shared job instead of each spawning its own."""
+    converges on the same shared job instead of each spawning its own.
+
+    owner_id only ever applies at creation — joining an ALREADY-existing
+    parent never changes who owns it. Without it, a newly created parent
+    has no owner at all, which hides it from that specialist's My Queue
+    (and from the job itself — a specialist's own access check is also
+    owner-based) until someone notices and reassigns it by hand; callers
+    should pass the natural "whoever was already handling this" owner
+    (the completing job's own owner_id) so a checklist job's ownership
+    carries forward period to period without that manual step."""
     parent = query_one(
         "SELECT id FROM job WHERE service_type = %s AND sla_date = %s AND client_id IS NULL "
         "AND status <> 'dismissed' ORDER BY id LIMIT 1",
@@ -2049,7 +2059,7 @@ def _get_or_create_recurring_parent(
         title = _recurring_parent_title(service["name"] if service else service_type, period_anchor, frequency)
         parent = create_job(
             client_id=None, category=category, service_type=service_type,
-            title=title, description=None, owner_id=None, source=source,
+            title=title, description=None, owner_id=owner_id, source=source,
             created_by=created_by, sla_date=period_anchor, attributes={},
         )
         # Recurring jobs are prepaid annually — never invoiced — but the
@@ -2113,7 +2123,7 @@ def create_next_cycle_job(completed_job_pk: int, actor_id: int | None = None) ->
 
     next_parent = _get_or_create_recurring_parent(
         job["service_type"], job["category"], period_anchor, job["source"],
-        actor_id or job["created_by"], client_ids,
+        actor_id or job["created_by"], client_ids, owner_id=job["owner_id"],
     )
 
     attrs["next_cycle_job_id"] = next_parent["id"]
@@ -2125,6 +2135,42 @@ def create_next_cycle_job(completed_job_pk: int, actor_id: int | None = None) ->
             f"{next_parent['job_id']} auto-created — next {frequency} cycle (due {period_anchor.isoformat()})",
         )
     return next_parent
+
+
+def add_recurring_job_client(job_pk: int, client_id: int, actor_id: int | None = None) -> None:
+    """Ops-coordinator "Add client" control on an existing clubbed job's own
+    page — adds one client to its checklist directly, idempotent (a client
+    already on it is a no-op). Re-syncs the rollup status since adding an
+    unticked row can turn an already-"Done" checklist back to in_progress —
+    the whole point of this control, not a side effect to work around."""
+    execute(
+        "INSERT INTO recurring_job_client (job_id, client_id) VALUES (%s, %s) "
+        "ON CONFLICT (job_id, client_id) DO NOTHING",
+        (job_pk, client_id),
+    )
+    _sync_recurring_rollup(job_pk, actor_id=actor_id)
+
+
+def create_recurring_parent_job(
+    service_type: str, category: str, due_date: date, source: str, created_by: int,
+    client_ids: list, owner_id: int | None,
+) -> dict:
+    """Ops-coordinator-driven creation of a clubbed job — Capture's own
+    "Clubbed job" mode. due_date is normalised down to its period (the
+    first of the month, or the year, per the service's own
+    recurring_frequency) — the same key every client due that period is
+    grouped under — and reuses the one place a recurring parent is ever
+    created/joined, so hand-creating one here behaves exactly like a
+    client rolling onto it automatically: if a parent for this service and
+    period already exists, the chosen clients just join it rather than a
+    second one being spawned."""
+    frequency = is_recurring_service(service_type)
+    if not frequency:
+        raise ValueError(f"{service_type} is not a recurring service.")
+    period_anchor = _recurring_period_anchor(due_date, frequency)
+    return _get_or_create_recurring_parent(
+        service_type, category, period_anchor, source, created_by, client_ids, owner_id=owner_id,
+    )
 
 
 def list_recurring_job_clients(job_pk: int) -> list:
@@ -2272,7 +2318,7 @@ def migrate_current_period_recurring_jobs(actor_id: int) -> dict:
 
     old_jobs = query(
         """
-        SELECT id, client_id, category, service_type, source, sla_date, status, completed_at
+        SELECT id, client_id, category, service_type, source, sla_date, status, completed_at, owner_id
         FROM job
         WHERE client_id IS NOT NULL AND hidden = FALSE AND status <> %s
           AND service_type = ANY(%s)
@@ -2292,7 +2338,7 @@ def migrate_current_period_recurring_jobs(actor_id: int) -> dict:
         period_anchor = _recurring_period_anchor(j["sla_date"], frequency)
         parent = _get_or_create_recurring_parent(
             j["service_type"], j["category"], period_anchor, j["source"] or "client_email",
-            actor_id, [j["client_id"]],
+            actor_id, [j["client_id"]], owner_id=j["owner_id"],
         )
         parents_touched[parent["id"]] = parent
 
