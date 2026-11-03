@@ -96,30 +96,56 @@ def _filters_and_table(jobs: list, only_own: bool, key_prefix: str, user: dict) 
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
+        status_key = f"{key_prefix}_f_status"
         status_choice = st.multiselect(
-            "Status", options=status_labels, key=f"{key_prefix}_f_status"
+            "Status", options=status_labels, default=ui.restore_filter(status_key, []), key=status_key,
         )
+        ui.persist_filter(status_key)
     with col2:
         clients = sorted({j["client_name"] for j in jobs if j["client_name"]})
+        client_options = ["All clients"] + clients
+        client_key = f"{key_prefix}_f_client"
+        client_default = ui.restore_filter(client_key, "All clients")
         client_choice = st.selectbox(
-            "Client", options=["All clients"] + clients, key=f"{key_prefix}_f_client",
-            format_func=lambda v: v if v == "All clients" else titlecase_name(v),
+            "Client", options=client_options,
+            index=client_options.index(client_default) if client_default in client_options else 0,
+            key=client_key, format_func=lambda v: v if v == "All clients" else titlecase_name(v),
         )
+        ui.persist_filter(client_key)
     with col3:
         categories = sorted({j["category"] for j in jobs})
         cat_labels = ["All"] + [humanize(c, CATEGORY_LABELS) for c in categories]
-        cat_choice = st.selectbox("Category", options=cat_labels, key=f"{key_prefix}_f_cat")
+        cat_key = f"{key_prefix}_f_cat"
+        cat_default = ui.restore_filter(cat_key, "All")
+        cat_choice = st.selectbox(
+            "Category", options=cat_labels,
+            index=cat_labels.index(cat_default) if cat_default in cat_labels else 0, key=cat_key,
+        )
+        ui.persist_filter(cat_key)
     with col4:
         owners = sorted({j["owner_name"] for j in jobs if j["owner_name"]})
         owner_choice = "All owners"
         if not only_own:
+            owner_options = ["All owners"] + owners
+            owner_key = f"{key_prefix}_f_owner"
+            owner_default = ui.restore_filter(owner_key, "All owners")
             owner_choice = st.selectbox(
-                "Owner", options=["All owners"] + owners, key=f"{key_prefix}_f_owner",
-                format_func=lambda v: v if v == "All owners" else titlecase_name(v),
+                "Owner", options=owner_options,
+                index=owner_options.index(owner_default) if owner_default in owner_options else 0,
+                key=owner_key, format_func=lambda v: v if v == "All owners" else titlecase_name(v),
             )
+            ui.persist_filter(owner_key)
 
-    search = st.text_input("Search job ID, title or client", key=f"{key_prefix}_f_search")
-    show_dismissed = st.checkbox("Show dismissed items", value=False, key=f"{key_prefix}_f_dismissed")
+    search_key = f"{key_prefix}_f_search"
+    search = st.text_input(
+        "Search job ID, title or client", value=ui.restore_filter(search_key, ""), key=search_key,
+    )
+    ui.persist_filter(search_key)
+    dismissed_key = f"{key_prefix}_f_dismissed"
+    show_dismissed = st.checkbox(
+        "Show dismissed items", value=ui.restore_filter(dismissed_key, False), key=dismissed_key,
+    )
+    ui.persist_filter(dismissed_key)
 
     filtered = jobs
     if status_choice:

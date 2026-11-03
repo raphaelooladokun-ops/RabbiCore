@@ -126,7 +126,13 @@ def _bulk_invoices_list(user: dict) -> None:
 
     status_options = ["All statuses"] + list(INVOICE_STATUS_LABELS.values())
     label_to_status = {v: k for k, v in INVOICE_STATUS_LABELS.items()}
-    status_choice = st.selectbox("Status", options=status_options, key="binv_f_status")
+    status_default = ui.restore_filter("binv_f_status", "All statuses")
+    status_choice = st.selectbox(
+        "Status", options=status_options,
+        index=status_options.index(status_default) if status_default in status_options else 0,
+        key="binv_f_status",
+    )
+    ui.persist_filter("binv_f_status")
     status_filter = label_to_status.get(status_choice)
 
     invoices = models.list_invoices(status=status_filter)

@@ -239,6 +239,36 @@ def back_button(label: str = "← Back") -> None:
         st.rerun()
 
 
+# ---------------------------------------------------------------------------
+# Filter persistence across a same-session detour (open a job/invoice/
+# client, then come back) — Streamlit prunes a widget's session_state entry
+# the instant that widget isn't instantiated on a given script run, which
+# is exactly what happens to a filter widget on a list page while a job/
+# invoice/client detail view is on screen instead: the next time the list
+# page renders, the widget comes back with no memory of what was picked
+# and silently resets to its default. A full-reload page (one that threads
+# its filters through st.query_params, e.g. performance_dashboard.py's own
+# p=/pdf=/ppl= scheme) doesn't need this — this is for the plain, same-
+# session case every filtered list+detail page otherwise hits.
+#
+# Usage: seed the widget's own value=/index=/default= from restore_filter,
+# call the widget with its usual key=, then call persist_filter(key) right
+# after — every filter on the page, every time, in that order.
+# ---------------------------------------------------------------------------
+def restore_filter(key: str, default):
+    """The value/index/default to pass into a filter widget — survives the
+    widget being unmounted for a run or more, unlike session_state[key]
+    itself once Streamlit prunes it."""
+    return st.session_state.get(f"_pf_{key}", default)
+
+
+def persist_filter(key: str) -> None:
+    """Call immediately after the widget with this key renders, to snapshot
+    its just-set value somewhere Streamlit's own pruning won't touch."""
+    if key in st.session_state:
+        st.session_state[f"_pf_{key}"] = st.session_state[key]
+
+
 _TABLE_WIDTHS = [0.4, 1.2, 1.6, 2.4, 1.3, 1.2, 1.0, 1.1]
 _TABLE_HEADERS = ["", "Job ID", "Client", "What", "Owner", "Status", "SLA date", "Invoice"]
 
