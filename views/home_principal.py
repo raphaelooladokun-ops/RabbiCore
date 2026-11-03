@@ -82,7 +82,7 @@ def render(user: dict) -> None:
     st.markdown("#### Done — awaiting invoice")
     unbilled = [
         j for j in jobs
-        if j["status"] == "done" and j["invoice_id"] is None and not models.is_recurring_parent_job(j)
+        if j["status"] == "done" and j["invoice_id"] is None and models.job_needs_billing(j)
     ]
     ui.jobs_row_table(unbilled, key_prefix="principal_unbilled")
 

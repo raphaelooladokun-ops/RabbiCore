@@ -44,6 +44,10 @@ def render(user: dict) -> None:
         _ready_to_invoice()
         st.divider()
 
+    if user["role"] in (ROLE_ADMIN, ROLE_SUPER_ADMIN):
+        _billing_exempt_control(user)
+        st.divider()
+
     _invoices_list(user)
 
     if user["role"] == ROLE_SUPER_ADMIN:
@@ -81,6 +85,120 @@ def _ready_to_invoice() -> None:
             st.session_state["invoice_seed_client"] = None
             st.session_state["invoice_revise_id"] = None
             ui.go_to_create_invoice()
+
+
+# ---------------------------------------------------------------------------
+# Done, recurring, never invoiced — an old-style single-client job on a
+# recurring service that was never folded into a clubbed checklist. It'll
+# sit on "Ready to invoice" forever (recurring services are prepaid, never
+# actually invoiced) unless an ops coordinator reviews and bulk-excludes it.
+# A clubbed parent job never appears here — it's already fully excluded
+# from every unbilled view on its own, and it's managed from its own
+# checklist page, not a generic job list like this one.
+# ---------------------------------------------------------------------------
+def _billing_exempt_control(user: dict) -> None:
+    _render_billing_exempt_result()
+
+    jobs = models.list_billing_exempt_candidates()
+    if not jobs:
+        return
+
+    st.markdown("#### Done, recurring — no invoice needed")
+    st.caption(
+        "A single-client job on a recurring service, done but never invoiced — recurring services are "
+        "prepaid annually, so these will sit here forever unless confirmed as zero-revenue. Review and "
+        "exclude the ones that really are; they'll stop being classed as unbilled anywhere in the app."
+    )
+
+    select_key = "billexempt_selectall"
+    prev_key = "billexempt_selectall_prev"
+    select_all = st.checkbox(f"Select all ({len(jobs)})", key=select_key)
+    if st.session_state.get(prev_key) != select_all:
+        for j in jobs:
+            st.session_state[f"billexempt_sel_{j['id']}"] = select_all
+        st.session_state[prev_key] = select_all
+        st.rerun()
+
+    for j in jobs:
+        with st.container(border=True):
+            c0, c1 = st.columns([0.05, 0.95])
+            c0.checkbox("", key=f"billexempt_sel_{j['id']}", label_visibility="collapsed")
+            with c1:
+                label = f"{j['job_id']} — {titlecase_name(j['client_name']) or '—'} · {j['service_name'] or j['service_type']}"
+                if st.button(label, key=f"billexempt_open_{j['id']}", type="tertiary"):
+                    ui.go_to_job(j["id"])
+                completed = j["completed_at"].strftime("%d %b %Y") if j.get("completed_at") else "—"
+                st.caption(f"Owner: {titlecase_name(j.get('owner_name')) or '—'} · Completed {completed}")
+
+    selected_ids = [j["id"] for j in jobs if st.session_state.get(f"billexempt_sel_{j['id']}")]
+    if not selected_ids:
+        return
+
+    by_id = {j["id"]: j for j in jobs}
+    st.write("")
+    if st.button(f"Exclude from billing ({len(selected_ids)})", key="billexempt_pick", type="primary"):
+        st.session_state["billexempt_pending"] = True
+
+    if not st.session_state.get("billexempt_pending"):
+        return
+
+    with st.container(border=True):
+        st.markdown(
+            f"**Exclude {len(selected_ids)} job(s) from billing?** They'll stop being classed as "
+            "unbilled anywhere in the app — a job's own page still lets an admin create a real invoice "
+            "for it later if that ever turns out to be wrong."
+        )
+        b1, b2, _ = st.columns([1.3, 0.8, 2])
+        confirm_clicked = b1.button("Confirm — exclude", type="primary", key="billexempt_confirm")
+        cancel_clicked = b2.button("Cancel", key="billexempt_cancel")
+
+        if cancel_clicked:
+            st.session_state["billexempt_pending"] = False
+            st.rerun()
+
+        if not confirm_clicked:
+            return
+
+        selected = [by_id[i] for i in selected_ids]
+        applied, skipped = models.bulk_exclude_jobs_from_billing(selected_ids, user["id"])
+        st.session_state["billexempt_result"] = {
+            "applied": [j["job_id"] for j in applied],
+            "skipped": [(j["job_id"], _billing_exempt_skip_reason(j)) for j in skipped],
+        }
+        for j in selected:
+            st.session_state.pop(f"billexempt_sel_{j['id']}", None)
+        st.session_state.pop(select_key, None)
+        st.session_state.pop(prev_key, None)
+        st.session_state["billexempt_pending"] = False
+        st.rerun()
+
+
+def _billing_exempt_skip_reason(job: dict) -> str:
+    if job.get("billing_exempt"):
+        return "already excluded"
+    if job["invoice_id"] is not None:
+        return "an invoice has since been created for it"
+    if job["status"] not in ("done", "closed"):
+        return f"no longer done/closed (now {humanize(job['status'])})"
+    return "no longer eligible"
+
+
+def _render_billing_exempt_result() -> None:
+    result = st.session_state.get("billexempt_result")
+    if not result:
+        return
+    with st.container(border=True):
+        applied, skipped = result["applied"], result["skipped"]
+        if applied:
+            st.success(f"{len(applied)} job(s) excluded from billing: {', '.join(applied)}")
+        if skipped:
+            st.warning(f"{len(skipped)} skipped:")
+            for code, reason in skipped:
+                st.caption(f"• {code} — {reason}")
+        if st.button("Dismiss", key="billexempt_result_dismiss"):
+            st.session_state["billexempt_result"] = None
+            st.rerun()
+    st.write("")
 
 
 def _invoices_list(user: dict) -> None:

@@ -947,7 +947,13 @@ def _invoice_section(job: dict, user: dict) -> None:
         if st.button(f"{job['invoice_code']} — {status_label}", key=f"jd_openinv_{job['id']}", type="tertiary"):
             ui.go_to_invoice(job["invoice_id"])
     else:
-        st.caption("Not yet invoiced.")
+        if job.get("billing_exempt"):
+            st.caption(
+                f"Excluded from billing — marked by {titlecase_name(job.get('billing_exempt_by_name')) or '—'} "
+                f"on {job['billing_exempt_at'].strftime('%d %b %Y')}. No invoice needed."
+            )
+        else:
+            st.caption("Not yet invoiced.")
         if user["role"] in (ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPER_ADMIN) and job["status"] != STATUS_DISMISSED:
             if st.button("Create invoice", key=f"jd_createinv_{job['id']}", type="primary"):
                 st.session_state["invoice_seed_job"] = job["id"]

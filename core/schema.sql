@@ -247,6 +247,17 @@ ALTER TABLE job ADD COLUMN IF NOT EXISTS hidden_by INTEGER REFERENCES staff(id);
 ALTER TABLE job ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 ALTER TABLE job ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
+-- An ops-coordinator-confirmed "this will never be invoiced" marker — a
+-- single-client job on a recurring (prepaid) service that was never
+-- folded into the shared clubbed checklist (see recurring_job_client),
+-- reviewed in bulk from Billing and excluded from every "done, unbilled"
+-- view the same way a clubbed job already is. Deliberate and audited
+-- (who/when), never a silent blanket filter on every recurring-service
+-- job — see models.job_needs_billing.
+ALTER TABLE job ADD COLUMN IF NOT EXISTS billing_exempt BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS billing_exempt_at TIMESTAMPTZ;
+ALTER TABLE job ADD COLUMN IF NOT EXISTS billing_exempt_by INTEGER REFERENCES staff(id);
+
 -- One-time backfill for jobs that already existed before this feature —
 -- status_changed_at is the best available approximation for rows with no
 -- real history to draw on. Guarded by "IS NULL" so it only ever fires once

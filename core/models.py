@@ -616,6 +616,7 @@ _JOB_SELECT_BASE = """
            sc.name AS service_name, sc.pillar AS service_pillar,
            b.job_id AS blocked_by_job_code, b.status AS blocked_by_status, b.title AS blocked_by_title,
            i.invoice_code AS invoice_code, i.status AS invoice_status,
+           be.name AS billing_exempt_by_name,
            (SELECT COUNT(*) FROM job d WHERE d.blocked_by = j.id AND d.status = 'blocked' AND d.hidden = FALSE)
                AS blocking_count
     FROM job j
@@ -624,6 +625,7 @@ _JOB_SELECT_BASE = """
     LEFT JOIN service_catalogue sc ON sc.code = j.service_type
     LEFT JOIN job b ON b.id = j.blocked_by AND b.hidden = FALSE
     LEFT JOIN invoice i ON i.id = j.invoice_id
+    LEFT JOIN staff be ON be.id = j.billing_exempt_by
 """
 _JOB_SELECT = _JOB_SELECT_BASE + " WHERE j.hidden = FALSE"
 
@@ -725,14 +727,15 @@ def list_jobs_for_invoice(invoice_id: int) -> list:
 def list_unbilled_jobs() -> list:
     """Every not-yet-invoiced job across all clients, any status — Rabbi
     invoices up front, so a freshly logged job is exactly as invoiceable as
-    a finished one. Newest first. A recurring checklist job is excluded —
-    it's prepaid annually and never invoiced at all, so it has no place on
-    a "ready to invoice" list."""
+    a finished one. Newest first. Excludes any job that will never be
+    invoiced (see job_needs_billing) — a clubbed recurring checklist job,
+    an old-style single-client recurring job, or one explicitly marked
+    billing_exempt — none of those belong on a "ready to invoice" list."""
     jobs = query(
         _JOB_SELECT + " AND j.invoice_id IS NULL AND j.status <> 'dismissed' "
         "ORDER BY j.created_at DESC"
     )
-    return [j for j in jobs if not is_recurring_parent_job(j)]
+    return [j for j in jobs if job_needs_billing(j)]
 
 
 def find_potential_duplicate(client_id: int | None, service_type: str | None):
@@ -1788,7 +1791,7 @@ def compute_risk(job: dict) -> str:
         # job never gets invoiced at all (prepaid annually, no invoicing
         # step) — "unbilled" would misleadingly flag that as missing
         # something, so it reads as plain done/ready instead.
-        if is_recurring_parent_job(job):
+        if not job_needs_billing(job):
             return RISK_GREEN
         return RISK_NAVY if job.get("invoice_id") is None else RISK_GREEN
     if status == STATUS_CLOSED:
@@ -2012,6 +2015,76 @@ def is_recurring_parent_job(job: dict) -> bool:
     no single client_id — a real client is never captured without one, so
     this can never collide with a plain job."""
     return bool(job.get("service_type")) and job.get("client_id") is None and bool(is_recurring_service(job["service_type"]))
+
+
+def is_recurring_service_job(job: dict) -> bool:
+    """True for ANY job on a recurring service — a clubbed parent
+    (is_recurring_parent_job) or an old-style single-client job that was
+    never folded into one, unlike is_recurring_parent_job which only
+    matches the client_id IS NULL shape. Both are prepaid and never carry
+    a real invoice, which is what job_needs_billing uses this for."""
+    return bool(job.get("service_type")) and bool(is_recurring_service(job["service_type"]))
+
+
+def job_needs_billing(job: dict) -> bool:
+    """False for a job that will never get a real invoice — a clubbed
+    parent job (is_recurring_parent_job; structurally guaranteed, no
+    single client to ever bill) or one an ops coordinator has explicitly
+    marked billing_exempt. True otherwise — deliberately NOT every
+    recurring-service job: an old-style single-client job on a recurring
+    service is NOT auto-excluded here, only once reviewed and confirmed
+    zero-revenue via Billing's bulk action (see
+    list_billing_exempt_candidates) — it has a real client, so unlike a
+    clubbed job its "never gets invoiced" status is a judgement call, not
+    a structural fact, and it needs to stay visible (as done/unbilled)
+    until someone actually makes that call; otherwise there'd be nothing
+    left to review or select. The one shared check every "done/ready,
+    unbilled" view reads from — Billing's Ready to invoice, Overview's
+    Done-unbilled KPI and worklist, and compute_risk's own badge — so
+    they can't drift apart."""
+    return not is_recurring_parent_job(job) and not job.get("billing_exempt")
+
+
+def list_billing_exempt_candidates() -> list:
+    """Old-style single-client jobs on a recurring service, done/closed,
+    never invoiced — Billing's own "exclude from billing" worklist. A
+    clubbed parent job (client_id IS NULL) is deliberately excluded here:
+    it's already fully excluded from every unbilled view on its own, and
+    it's managed from its own checklist page, never from a generic job
+    list like this one."""
+    jobs = list_jobs(statuses=[STATUS_DONE, STATUS_CLOSED], exclude_dismissed=True)
+    return [
+        j for j in jobs
+        if j["invoice_id"] is None and j["client_id"] is not None
+        and is_recurring_service_job(j) and not j.get("billing_exempt")
+    ]
+
+
+def bulk_exclude_jobs_from_billing(job_ids: list, actor_id: int) -> tuple[list, list]:
+    """Batch of marking a job billing_exempt — same eligibility rule as
+    list_billing_exempt_candidates (done/closed, unbilled, single-client,
+    recurring service, not already exempt), applied per job rather than
+    assumed for the whole batch; anything else is skipped and reported,
+    never failed. Returns (applied, skipped), each a list of the job's own
+    full row, matching the shape of the invoice bulk actions."""
+    applied, skipped = [], []
+    for job_pk in job_ids:
+        job = get_job(job_pk)
+        if not job:
+            continue
+        eligible = (
+            job["status"] in (STATUS_DONE, STATUS_CLOSED) and job["invoice_id"] is None
+            and job["client_id"] is not None and is_recurring_service_job(job) and not job.get("billing_exempt")
+        )
+        if not eligible:
+            skipped.append(job)
+            continue
+        execute(
+            "UPDATE job SET billing_exempt = TRUE, billing_exempt_at = now(), billing_exempt_by = %s WHERE id = %s",
+            (actor_id, job_pk),
+        )
+        applied.append(job)
+    return applied, skipped
 
 
 def _recurring_period_anchor(d: date, frequency: str) -> date:
@@ -2460,7 +2533,7 @@ def firm_summary() -> dict:
         by_status[j["status"]] = by_status.get(j["status"], 0) + 1
         if is_stalled(j):
             stalled += 1
-        if j["status"] == STATUS_DONE and j["invoice_id"] is None and not is_recurring_parent_job(j):
+        if j["status"] == STATUS_DONE and j["invoice_id"] is None and job_needs_billing(j):
             done_unbilled += 1
         if compute_risk(j) == RISK_RED:
             red_flags += 1
