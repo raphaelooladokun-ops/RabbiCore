@@ -481,13 +481,22 @@ class ServiceCreateError(Exception):
     pass
 
 
-def create_service(name: str, pillar: str) -> dict:
+def create_service(name: str, pillar: str, recurring_frequency: str | None = None) -> dict:
     """Admin/super_admin-only: add a new service to the catalogue. A
     service outside the 4 locked pillars goes under 'Other' (job.category
     'other') — selectable in Capture immediately, exactly like any other
     service, since Capture always reads the live catalogue rather than a
     hardcoded list. The code is auto-generated from the name (never
-    typed), with a numeric suffix appended if it would otherwise collide."""
+    typed), with a numeric suffix appended if it would otherwise collide.
+
+    recurring_frequency ('monthly'/'yearly'/None) marks it as a prepaid,
+    never-invoiced obligation shared across clients as one clubbed
+    checklist job per period (see is_recurring_service / Capture's
+    "Clubbed monthly job" mode) rather than a one-off per client — set it
+    once here, at creation, same as every other recurring service in the
+    catalogue; there's deliberately no way to flip it on an existing
+    service from the UI, since that would need to reconcile whatever jobs
+    already exist on it."""
     name = name.strip()
     if not name:
         raise ServiceCreateError("Enter a service name.")
@@ -505,9 +514,9 @@ def create_service(name: str, pillar: str) -> dict:
 
     max_sort = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM service_catalogue")["m"]
     execute(
-        "INSERT INTO service_catalogue (code, pillar, name, fields, active, sort_order) "
-        "VALUES (%s, %s, %s, '[]'::jsonb, TRUE, %s)",
-        (code, pillar, name, max_sort + 1),
+        "INSERT INTO service_catalogue (code, pillar, name, fields, active, sort_order, recurring_frequency) "
+        "VALUES (%s, %s, %s, '[]'::jsonb, TRUE, %s, %s)",
+        (code, pillar, name, max_sort + 1, recurring_frequency),
     )
     return get_service(code)
 

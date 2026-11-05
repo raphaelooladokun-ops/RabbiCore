@@ -23,9 +23,12 @@ def render(user: dict) -> None:
     _catalogue_list()
 
 
+_RECURRING_OPTIONS = {"Not recurring": None, "Monthly": "monthly", "Yearly": "yearly"}
+
+
 def _create_service_form() -> None:
     st.markdown("#### Add a service")
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         name = st.text_input("Service name *", placeholder="e.g. Trademark Registration", key="svc_name")
     with col2:
@@ -33,13 +36,20 @@ def _create_service_form() -> None:
             "Pillar *", options=_PILLARS, key="svc_pillar",
             help="Doesn't fit CAC/Immigration/CIT/State? Choose Other — it gets its own category.",
         )
+    with col3:
+        recurring_choice = st.selectbox(
+            "Recurring?", options=list(_RECURRING_OPTIONS.keys()), key="svc_recurring",
+            help="A prepaid obligation that comes up on a schedule (e.g. monthly VAT returns) — every "
+            "client due the same period shares one clubbed checklist job instead of each getting a "
+            "separate one, and it's never invoiced. Leave as 'Not recurring' for a normal one-off job.",
+        )
 
     if pillar == "Other":
         st.caption("This service will appear under the **Other Services** category.")
 
     if st.button("Add service", type="primary", key="svc_submit"):
         try:
-            service = models.create_service(name, pillar)
+            service = models.create_service(name, pillar, _RECURRING_OPTIONS[recurring_choice])
         except models.ServiceCreateError as e:
             st.error(str(e))
         else:

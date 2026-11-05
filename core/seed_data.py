@@ -49,6 +49,10 @@ SERVICE_CATALOGUE = [
     {"code": "IMM-DELETION-EXPAT", "pillar": "Immigration", "name": "IMM — Deletion of Expatriate", "fields": []},
     {"code": "IMM-CHANGE-EXPAT", "pillar": "Immigration", "name": "IMM — Change of Expatriate", "fields": []},
     {"code": "IMM-NIS-INSPECTION", "pillar": "Immigration", "name": "IMM — NIS Inspection", "fields": []},
+    {
+        "code": "IMM-MONTHLY-RETURNS", "pillar": "Immigration", "name": "IMM — Monthly Returns", "fields": [],
+        "recurring_frequency": "monthly",
+    },
 
     # ---- PILLAR 3 — CIT (Federal Tax) ----------------------------------------
     {"code": "CIT-REGISTRATION", "pillar": "CIT", "name": "CIT — Registration (Tax & VAT Certificate)", "fields": []},
