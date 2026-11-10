@@ -2866,3 +2866,46 @@ def list_file_register(client_id: int | None = None) -> list:
         params.append(client_id)
     sql += " ORDER BY fr.out_at DESC"
     return query(sql, tuple(params))
+
+
+# ---------------------------------------------------------------------------
+# CLIENT FOLDER — the master catalogue of what physically exists in the file
+# room per client, independent of file_register's own movement log. Written
+# one at a time from File Register, or in bulk from an uploaded register
+# (core/folder_import.py) — file_room_admin and super_admin only.
+# ---------------------------------------------------------------------------
+FOLDER_STATUSES = ("active", "archived", "closed")
+
+_CLIENT_FOLDER_SELECT = (
+    "SELECT cf.*, c.name AS client_name FROM client_folder cf JOIN client c ON c.id = cf.client_id "
+)
+
+
+def can_write_client_folders(user: dict) -> bool:
+    return user["role"] in (ROLE_FILE_ROOM_ADMIN, ROLE_SUPER_ADMIN)
+
+
+def create_client_folder(
+    client_id: int, folder_name: str, *, category: str | None = None, location: str | None = None,
+    opened_date=None, status: str = "active", notes: str | None = None, created_by: int | None = None,
+) -> dict:
+    row = execute_returning(
+        "INSERT INTO client_folder (client_id, folder_name, category, location, opened_date, status, notes, "
+        "created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (client_id, folder_name, category, location, opened_date, status or "active", notes, created_by),
+    )
+    return get_client_folder(row["id"])
+
+
+def get_client_folder(folder_pk: int):
+    return query_one(_CLIENT_FOLDER_SELECT + "WHERE cf.id = %s", (folder_pk,))
+
+
+def list_client_folders(client_id: int | None = None) -> list:
+    sql = _CLIENT_FOLDER_SELECT + "WHERE 1=1"
+    params: list = []
+    if client_id:
+        sql += " AND cf.client_id = %s"
+        params.append(client_id)
+    sql += " ORDER BY c.name, cf.folder_name"
+    return query(sql, tuple(params))

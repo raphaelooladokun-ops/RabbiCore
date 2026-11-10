@@ -652,6 +652,29 @@ CREATE INDEX IF NOT EXISTS idx_file_register_job ON file_register(job_id);
 CREATE INDEX IF NOT EXISTS idx_file_register_out ON file_register(out_at DESC) WHERE returned_at IS NULL;
 
 -- ---------------------------------------------------------------------------
+-- CLIENT FOLDER — the master catalogue of what physically exists in the
+-- file room for each client: one row per folder/file, independent of
+-- file_register's own movement log (a folder can exist here without ever
+-- having been checked out). Built for the bulk upload of an existing
+-- paper register (core/folder_import.py) as well as one-off additions from
+-- File Register itself.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS client_folder (
+    id              SERIAL PRIMARY KEY,
+    client_id       INTEGER NOT NULL REFERENCES client(id),
+    folder_name     TEXT NOT NULL,
+    category        TEXT,
+    location        TEXT,
+    opened_date     DATE,
+    status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'closed')),
+    notes           TEXT,
+    created_by      INTEGER REFERENCES staff(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_folder_client ON client_folder(client_id);
+
+-- ---------------------------------------------------------------------------
 -- RECURRING JOB CLIENT — a recurring service's job for one period (e.g.
 -- "Monthly VAT Returns — Oct 2026") now covers every client with that
 -- obligation in one parent job (job.client_id IS NULL) instead of each
