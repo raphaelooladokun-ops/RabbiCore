@@ -114,10 +114,33 @@ def _new_checkout(user: dict) -> None:
             placeholder="Who is taking this file?", key="fr_collector",
         )
 
-        folder_names = st.text_area(
-            "Folder / file name(s) *", key="fr_folders", placeholder="e.g. Main client file\nIMM — E-CERPAC sub-file",
-            help="One folder or file per line — a job can need more than one out at once.",
+        catalog_names = (
+            [f["folder_name"] for f in models.list_client_folders(client_map[client_name]["id"])]
+            if client_name else []
         )
+
+        selected_folders: list[str] = []
+        if catalog_names:
+            selected_folders = st.multiselect(
+                "Folder / file name(s) *", options=catalog_names, key="fr_folders_select",
+                help="From this client's folder catalogue — pick one or more.",
+            )
+            extra_folders = st.text_area(
+                "Other folder/file name(s)", key="fr_folders_extra",
+                placeholder="Not on the list above? Add it here, one per line.",
+            )
+        else:
+            extra_folders = st.text_area(
+                "Folder / file name(s) *", key="fr_folders_extra",
+                placeholder="e.g. Main client file\nIMM — E-CERPAC sub-file",
+                help=(
+                    "One folder or file per line — a job can need more than one out at once. "
+                    + ("No folders on file for this client yet, so type the name(s) directly."
+                       if client_name else "")
+                ),
+            )
+
+        folder_names = "\n".join(selected_folders + [l.strip() for l in extra_folders.splitlines() if l.strip()])
 
         if st.button("Check out", key="fr_checkout", type="primary"):
             if not (client_name and job_name and collector_name and folder_names.strip()):
