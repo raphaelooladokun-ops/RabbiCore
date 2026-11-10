@@ -640,6 +640,13 @@ CREATE TABLE IF NOT EXISTS file_register (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Which specific physical folder(s)/file(s) were taken out for this check-out
+-- — a job can need more than one (e.g. the client's main file plus a
+-- specific immigration sub-file), typed freely, one per line. Nullable at
+-- the DB level (an existing row predates this field); required in the UI
+-- for every new check-out.
+ALTER TABLE file_register ADD COLUMN IF NOT EXISTS folder_names TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_file_register_client ON file_register(client_id);
 CREATE INDEX IF NOT EXISTS idx_file_register_job ON file_register(job_id);
 CREATE INDEX IF NOT EXISTS idx_file_register_out ON file_register(out_at DESC) WHERE returned_at IS NULL;

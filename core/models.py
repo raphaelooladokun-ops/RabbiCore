@@ -2836,12 +2836,13 @@ def can_write_file_register(user: dict) -> bool:
 
 
 def checkout_file(
-    client_id: int, job_id: int, collected_by: int, *, out_at=None, logged_by: int | None = None
+    client_id: int, job_id: int, collected_by: int, folder_names: str, *,
+    out_at=None, logged_by: int | None = None,
 ) -> dict:
     row = execute_returning(
-        "INSERT INTO file_register (client_id, job_id, collected_by, logged_by, out_at) "
-        "VALUES (%s, %s, %s, %s, COALESCE(%s, now())) RETURNING id",
-        (client_id, job_id, collected_by, logged_by, out_at),
+        "INSERT INTO file_register (client_id, job_id, collected_by, logged_by, out_at, folder_names) "
+        "VALUES (%s, %s, %s, %s, COALESCE(%s, now()), %s) RETURNING id",
+        (client_id, job_id, collected_by, logged_by, out_at, folder_names),
     )
     return query_one(_FILE_REGISTER_SELECT + "WHERE fr.id = %s", (row["id"],))
 

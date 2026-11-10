@@ -13,8 +13,18 @@ from core import models
 from core import ui
 from core.constants import titlecase_name
 
-_OUT_WIDTHS = [2.0, 1.8, 2.2, 1.6, 0.9, 1.6]
-_HISTORY_WIDTHS = [2.0, 1.8, 2.2, 1.8, 1.8, 1.1]
+_OUT_WIDTHS = [1.5, 1.3, 1.8, 1.3, 1.2, 0.7, 1.7]
+_HISTORY_WIDTHS = [1.6, 1.4, 1.8, 1.4, 1.4, 1.4, 0.9]
+
+
+def _format_folders(raw: str | None) -> str:
+    """Folder/file names are typed one per line (more than one for a job
+    that needs several) — tables are narrow, so the list view shows them
+    joined compactly rather than wrapping across several row-heights."""
+    if not raw:
+        return "—"
+    names = [line.strip() for line in raw.splitlines() if line.strip()]
+    return ", ".join(names) if names else "—"
 
 
 def render(user: dict) -> None:
@@ -37,7 +47,7 @@ def _currently_out(can_write: bool) -> None:
         return
 
     header = st.columns(_OUT_WIDTHS)
-    for col, label in zip(header, ["Client", "Job", "Collected by", "Out since", "Days out", ""]):
+    for col, label in zip(header, ["Client", "Job", "Folder(s)", "Collected by", "Out since", "Days out", ""]):
         col.markdown(f"**{label}**")
 
     now = datetime.now(timezone.utc)
@@ -46,16 +56,17 @@ def _currently_out(can_write: bool) -> None:
         if cols[0].button(titlecase_name(e["client_name"]), key=f"fileclient_out_{e['id']}", type="tertiary"):
             ui.go_to_client(e["client_id"])
         cols[1].write(f"{e['job_code']} — {e['job_title']}")
-        cols[2].write(titlecase_name(e["collected_by_name"]))
-        cols[3].write(e["out_at"].strftime("%d %b %Y, %H:%M"))
-        cols[4].write(str((now - e["out_at"]).days))
+        cols[2].write(_format_folders(e.get("folder_names")))
+        cols[3].write(titlecase_name(e["collected_by_name"]))
+        cols[4].write(e["out_at"].strftime("%d %b %Y, %H:%M"))
+        cols[5].write(str((now - e["out_at"]).days))
         if can_write:
-            if cols[5].button("Mark returned", key=f"filereturn_{e['id']}"):
+            if cols[6].button("Mark returned", key=f"filereturn_{e['id']}"):
                 models.mark_file_returned(e["id"])
                 st.toast("Marked returned.", icon="✅")
                 st.rerun()
         else:
-            cols[5].write("—")
+            cols[6].write("—")
 
 
 def _new_checkout(user: dict) -> None:
@@ -87,13 +98,18 @@ def _new_checkout(user: dict) -> None:
             placeholder="Who is taking this file?", key="fr_collector",
         )
 
+        folder_names = st.text_area(
+            "Folder / file name(s) *", key="fr_folders", placeholder="e.g. Main client file\nIMM — E-CERPAC sub-file",
+            help="One folder or file per line — a job can need more than one out at once.",
+        )
+
         if st.button("Check out", key="fr_checkout", type="primary"):
-            if not (client_name and job_name and collector_name):
-                st.error("Client, job and collecting staff member are required.")
+            if not (client_name and job_name and collector_name and folder_names.strip()):
+                st.error("Client, job, collecting staff member and at least one folder/file name are required.")
             else:
                 models.checkout_file(
                     client_map[client_name]["id"], job_map[job_name]["id"], staff_map[collector_name]["id"],
-                    logged_by=user["id"],
+                    folder_names.strip(), logged_by=user["id"],
                 )
                 st.toast("File checked out.", icon="✅")
                 st.rerun()
@@ -107,7 +123,7 @@ def _history() -> None:
         return
 
     header = st.columns(_HISTORY_WIDTHS)
-    for col, label in zip(header, ["Client", "Job", "Collected by", "Out", "Returned", "Status"]):
+    for col, label in zip(header, ["Client", "Job", "Folder(s)", "Collected by", "Out", "Returned", "Status"]):
         col.markdown(f"**{label}**")
 
     for e in entries:
@@ -115,8 +131,9 @@ def _history() -> None:
         if cols[0].button(titlecase_name(e["client_name"]), key=f"fileclient_hist_{e['id']}", type="tertiary"):
             ui.go_to_client(e["client_id"])
         cols[1].write(f"{e['job_code']} — {e['job_title']}")
-        cols[2].write(titlecase_name(e["collected_by_name"]))
-        cols[3].write(e["out_at"].strftime("%d %b %Y, %H:%M"))
-        cols[4].write(e["returned_at"].strftime("%d %b %Y, %H:%M") if e["returned_at"] else "—")
+        cols[2].write(_format_folders(e.get("folder_names")))
+        cols[3].write(titlecase_name(e["collected_by_name"]))
+        cols[4].write(e["out_at"].strftime("%d %b %Y, %H:%M"))
+        cols[5].write(e["returned_at"].strftime("%d %b %Y, %H:%M") if e["returned_at"] else "—")
         status = models.file_entry_status(e)
-        cols[5].write("Out" if status == models.FILE_STATUS_OUT else "Returned")
+        cols[6].write("Out" if status == models.FILE_STATUS_OUT else "Returned")
